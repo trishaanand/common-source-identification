@@ -140,45 +140,25 @@ proc main() {
   for i in prnuDomain {
     var prnu = calculatePrnu(h, w, imageFileNames[i]);
     var prnuRot = rotated180Prnu(h, w, prnu);
-    if(i == 1) {  
-      prnuI = prnu;
-
-      writeln("Before fft prnuOrig (100,100) : ", prnu(100,100));
-      writeln("Before fft prnuI (100,100) : ", prnuI(100,100));
-    } else if (i == 2) {
-      prnuRotJ = prnuRot;
-      writeln("Before fft prnuRotOrig (100,100) : ", prnuRot(100,100));
-      writeln("Before fft prnuRotJ (100,100) : ", prnuRotJ(100,100));
-    }
-    // writeln("Before fft (100,100) : ", prnu(100,100));
-
-    // prnuArray[i][.., ..] = prnu;
-    // writeln("Before fft for array (100,100) : ", prnuArray[i]);
-    // // writeln("Value of i: ", i);
-    // var prn : [imageDomain] real;
-    // prn = prnuArray[i];
-    // writeln("Before fft array (100,100) : ", prn(100, 100));
-    // prnuRotArray(i) = prnuRot;
-
+    prnuArray[i] = prnu;
+    writeln("Before fft for array (100,100) : ", prnuArray[i](100, 100));
+    prnuRotArray(i) = prnuRot;
+    writeln("Before rotated fft for array (100,100) : ", prnuArray[i](100, 100));
     // if(writeOutput) {
     //   write2DRealArray(prnu, imageFilesPRNU[i]);
     //   write2DRealArray(prnuRot, getRotatedFilename(imageFilesPRNU[i]));
     // }
   }
 
-  computeEverything(h, w, prnuI, prnuRotJ);
   /* Calculate correlation now */
-  // for i in prnuDomain {
-  //   for j in prnuDomain {
-  //     if (i != j) {
-  //       //call function here.
-  //       // writeln("i,j: ", i, j);
-  //       // writeln("Before computeEverything (100,100) : ", prnuArray[i](100, 100));
-  //       var prnu = prnuArray(i);
-  //       corrMatrix(i,j) = computeEverything(h, w, prnuArray(i), prnuRotArray(j));
-  //     }
-  //   }
-  // }
+  for i in prnuDomain {
+    for j in prnuDomain {
+      if (i != j) {
+        //call function here.
+        corrMatrix(i,j) = computeEverything(h, w, prnuArray(i), prnuRotArray(j));
+      }
+    }
+  }
 
   overallTimer.stop();
 
