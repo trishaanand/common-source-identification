@@ -16,6 +16,9 @@ use read_jpg;
 /* Compute PRNU noise patterns. */
 use prnu;
 
+/* user defined functions */
+use fft;
+
 /* Configuration parameters */
 config const imagedir : string = "images";
 config const writeOutput : bool = false;
@@ -93,6 +96,7 @@ proc rotated180Prnu(h : int, w : int, prnu : [] real) {
 proc main() {
   /* Obtain the images. */
   // images/Pentax_XXX.JPG
+  writeln("Start here");
   var imageFileNames = getImageFileNamesFullPath(imagedir);
   // Arpit - Getting the list of files to write prnu for an image with the same filename as the original image
   // Can also be derived by splitting the complete image but this was just easier.
@@ -111,6 +115,9 @@ proc main() {
   /* Create a domain for the correlation matrix. */
   const corrDomain : domain(2) = {1..n, 1..n};
   var corrMatrix : [corrDomain] real;
+
+  const imageDomain: domain(2) = {0..h,0..w};
+  var prnuArray, prnuRotArray : [1..n][imageDomain] real;
 
   var overallTimer : Timer;
 
@@ -136,9 +143,22 @@ proc main() {
     var prnu = calculatePrnu(h, w, imageFileNames[i]);
     var prnuRot = rotated180Prnu(h, w, prnu);
 
-    if(writeOutput) {
-      write2DRealArray(prnu, imageFilesPRNU[i]);
-      write2DRealArray(prnuRot, getRotatedFilename(imageFilesPRNU[i]));
+    prnuArray[i] = prnu;
+    prnuRotArray[i] = prnuRot;
+
+    // if(writeOutput) {
+    //   write2DRealArray(prnu, imageFilesPRNU[i]);
+      // write2DRealArray(prnuRot, getRotatedFilename(imageFilesPRNU[i]));
+    // }
+  }
+
+  /* Calculate correlation now */
+  for i in 1..n {
+    for j in 1..n {
+      if (i != j) {
+        //call function here.
+        calculateFFT(h, w, prnuArray[i], prnuRotArray[j]);
+      }
     }
   }
 
@@ -155,4 +175,6 @@ proc main() {
     // for now, also write the prnu noise pattern, can be removed
     // write2DRealArray(prnu, imageFiles.front());
   }
+
+  writeln("End");
 }
