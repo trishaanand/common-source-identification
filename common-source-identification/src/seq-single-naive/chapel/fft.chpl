@@ -1,4 +1,5 @@
 use FFTW_MT;
+use Math;
 
 proc computeEverything(h : int, w : int, prnu : [] real, prnuRot : [] real) {
     const imageDomain: domain(2) = {0..#h,0..#w};
@@ -56,7 +57,7 @@ proc computeEverything(h : int, w : int, prnu : [] real, prnuRot : [] real) {
         }
 
     }
-    writeln("max i: ", maxI, " max j: ", maxJ, " peak: ", max );
+    writeln("max i: ", maxI, " max j: ", maxJ, " peak: ", sqrt(max) );
 
     //In the result matrix, remove 11x11 elements around the max from the total sum
     var lowI, highI, lowJ, highJ : int;
@@ -77,11 +78,12 @@ proc computeEverything(h : int, w : int, prnu : [] real, prnuRot : [] real) {
         lowJ = maxJ - 5;
     }
     if ((maxJ + 5) > w) {
-        highJ = h;
+        highJ = w;
     } else {
         highJ = maxJ + 5;
     } 
 
+    writeln("lowI: ", lowI, " highI: ", highI, "lowJ: ", lowJ, " highJ: ", highJ);
     const subD: domain(2) = {lowI..highI, lowJ..highJ};
     for (i,j) in subD {
         sum -= result(i,j);
@@ -90,6 +92,7 @@ proc computeEverything(h : int, w : int, prnu : [] real, prnuRot : [] real) {
     //Calculate average energy
     var energy : real;
     energy = sum/((h*w) - ((highI-lowI + 1)*(highJ-lowJ + 1)));
+    // energy = sum/((h*w) - 121);
     writeln("energy: ", energy);
     var PCE = max/energy;
     writeln("pce: ", PCE);
