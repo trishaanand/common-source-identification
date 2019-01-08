@@ -26,10 +26,21 @@ proc addDirectory(fileName : string, dir : string) : string {
 }
 
 /* Get an array of the file names of the images in directory dir. */
-proc getImageFileNames(dir : string) {
+proc getImageFileNamesFullPath(dir : string) {
     var imageFiles = listdir(dir);
     sort(imageFiles);
     return addDirectory(imageFiles, dir);
+}
+
+proc getRotatedFilename(fileName: string) {
+  return "rot-" + fileName;
+}
+
+/* Get an array of the file names of the images in directory dir. */
+proc getImageFileNames(dir : string) {
+    var imageFiles = listdir(dir);
+    sort(imageFiles);
+    return imageFiles;
 }
 
 /* Write a real array to a file. */
@@ -46,9 +57,47 @@ proc write2DRealArray(array : [] real, fileName :string) {
   }
 }
 
+/* Given a file name this function calculates & returns the prnu data for that image */
+proc calculatePrnu(h : int, w : int, imageFileName : string) {
+  writeln("In the calculatePrnu fxn with imageFileName: ", imageFileName);
+  
+  /* Create a domain for an image and allocate the image itself */
+  const imageDomain: domain(2) = {0..#h,0..#w};
+  var image : [imageDomain] RGB;
+
+  /* allocate a prnu_data record */
+  var data : prnu_data;
+  var prnu : [imageDomain] real;
+
+  /* Read in the first image. */
+  readJPG(image, imageFileName);
+
+  prnuInit(h, w, data);
+  prnuExecute(prnu, image, data);
+  prnuDestroy(data);
+
+  return prnu;
+}
+
+proc rotated180Prnu(h : int, w : int, prnu : [] real) {
+  const imageDomain: domain(2) = {0..#h,0..#w};
+  var prnuRot : [imageDomain] real;
+
+  /* Rotate the matrix 180 degrees */
+  for (i,j) in imageDomain do 
+    prnuRot(i,j) = prnu(h-i-1, w-j-1);
+
+  return prnuRot;
+}
+
 proc main() {
   /* Obtain the images. */
-  var imageFileNames = getImageFileNames(imagedir);
+  // images/Pentax_XXX.JPG
+  var imageFileNames = getImageFileNamesFullPath(imagedir);
+  // Arpit - Getting the list of files to write prnu for an image with the same filename as the original image
+  // Can also be derived by splitting the complete image but this was just easier.
+  var imageFilesPRNU = getImageFileNames(imagedir);
+  // var imageFilesPrnuRot = getImageFileNames(imagedir);
 
   /* n represents the number of images that have to be correlated. */
   var n = imageFileNames.size;
@@ -77,21 +126,21 @@ proc main() {
    * It shows how to read in a JPG image, how to compute a noise pattern.
    * Modify the code to compute the correlation matrix.
    */
-  
-  /* Create a domain for an image and allocate the image itself */
-  const imageDomain: domain(2) = {0..#h,0..#w};
-  var image : [imageDomain] RGB;
 
-  /* Read in the first image. */
-  readJPG(image, imageFileNames.front());
+  /* 
+    Arpit - We have the prnu calculated for the ith image here in the variable `prnu` 
+    1. Calculate the prnu for all the images and write them to a file/store them in memory
+    2. Calculate corrMatrix for i,j images in O(n^2)
+  */
+  for i in 1..n {
+    var prnu = calculatePrnu(h, w, imageFileNames[i]);
+    var prnuRot = rotated180Prnu(h, w, prnu);
 
-  /* allocate a prnu_data record */
-  var data : prnu_data;
-  var prnu : [imageDomain] real;
-
-  prnuInit(h, w, data);
-  prnuExecute(prnu, image, data);
-  prnuDestroy(data);
+    if(writeOutput) {
+      write2DRealArray(prnu, imageFilesPRNU[i]);
+      write2DRealArray(prnuRot, getRotatedFilename(imageFilesPRNU[i]));
+    }
+  }
 
   overallTimer.stop();
 
@@ -104,6 +153,6 @@ proc main() {
     writeln("Writing output files...");
     write2DRealArray(corrMatrix, "corrMatrix");
     // for now, also write the prnu noise pattern, can be removed
-    write2DRealArray(prnu, "prnu");
+    // write2DRealArray(prnu, imageFiles.front());
   }
 }

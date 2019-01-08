@@ -41,3 +41,7 @@ cleanoutput:
 
 # Clean everyting
 cleanall: clean cleanslurm cleanoutput
+
+# Run the prnu
+run: 
+	./common-source-identification --writeOutput
