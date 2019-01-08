@@ -62,10 +62,9 @@ proc write2DRealArray(array : [] real, fileName :string) {
 
 /* Given a file name this function calculates & returns the prnu data for that image */
 proc calculatePrnu(h : int, w : int, imageFileName : string) {
-  writeln("In the calculatePrnu fxn with imageFileName: ", imageFileName);
   
   /* Create a domain for an image and allocate the image itself */
-  const imageDomain: domain(2) = {0..#h,0..#w};
+  const imageDomain: domain(2) = {0..#h, 0..#w};
   var image : [imageDomain] RGB;
 
   /* allocate a prnu_data record */
@@ -83,7 +82,7 @@ proc calculatePrnu(h : int, w : int, imageFileName : string) {
 }
 
 proc rotated180Prnu(h : int, w : int, prnu : [] real) {
-  const imageDomain: domain(2) = {0..#h,0..#w};
+  const imageDomain: domain(2) = {0..#h, 0..#w};
   var prnuRot : [imageDomain] real;
 
   /* Rotate the matrix 180 degrees */
@@ -101,7 +100,6 @@ proc main() {
   // Arpit - Getting the list of files to write prnu for an image with the same filename as the original image
   // Can also be derived by splitting the complete image but this was just easier.
   var imageFilesPRNU = getImageFileNames(imagedir);
-  // var imageFilesPrnuRot = getImageFileNames(imagedir);
 
   /* n represents the number of images that have to be correlated. */
   var n = imageFileNames.size;
@@ -116,8 +114,10 @@ proc main() {
   const corrDomain : domain(2) = {1..n, 1..n};
   var corrMatrix : [corrDomain] real;
 
-  const imageDomain: domain(2) = {0..h,0..w};
-  var prnuArray, prnuRotArray : [1..n][imageDomain] real;
+  const imageDomain : domain(2) = {0..#h, 0..#w};
+  const prnuDomain : domain(1) = {1..n};
+  
+  var prnuArray, prnuRotArray : [prnuDomain][imageDomain] real;
 
   var overallTimer : Timer;
 
@@ -134,33 +134,51 @@ proc main() {
    * Modify the code to compute the correlation matrix.
    */
 
-  /* 
-    Arpit - We have the prnu calculated for the ith image here in the variable `prnu` 
-    1. Calculate the prnu for all the images and write them to a file/store them in memory
-    2. Calculate corrMatrix for i,j images in O(n^2)
-  */
-  for i in 1..n {
+  // Calculating the prnus and really trying hard to save to an array
+  var prnuI, prnuRotJ : [imageDomain] real;
+
+  for i in prnuDomain {
     var prnu = calculatePrnu(h, w, imageFileNames[i]);
     var prnuRot = rotated180Prnu(h, w, prnu);
+    if(i == 1) {  
+      prnuI = prnu;
 
-    prnuArray[i] = prnu;
-    prnuRotArray[i] = prnuRot;
+      writeln("Before fft prnuOrig (100,100) : ", prnu(100,100));
+      writeln("Before fft prnuI (100,100) : ", prnuI(100,100));
+    } else if (i == 2) {
+      prnuRotJ = prnuRot;
+      writeln("Before fft prnuRotOrig (100,100) : ", prnuRot(100,100));
+      writeln("Before fft prnuRotJ (100,100) : ", prnuRotJ(100,100));
+    }
+    // writeln("Before fft (100,100) : ", prnu(100,100));
+
+    // prnuArray[i][.., ..] = prnu;
+    // writeln("Before fft for array (100,100) : ", prnuArray[i]);
+    // // writeln("Value of i: ", i);
+    // var prn : [imageDomain] real;
+    // prn = prnuArray[i];
+    // writeln("Before fft array (100,100) : ", prn(100, 100));
+    // prnuRotArray(i) = prnuRot;
 
     // if(writeOutput) {
     //   write2DRealArray(prnu, imageFilesPRNU[i]);
-      // write2DRealArray(prnuRot, getRotatedFilename(imageFilesPRNU[i]));
+    //   write2DRealArray(prnuRot, getRotatedFilename(imageFilesPRNU[i]));
     // }
   }
 
+  computeEverything(h, w, prnuI, prnuRotJ);
   /* Calculate correlation now */
-  for i in 1..n {
-    for j in 1..n {
-      if (i != j) {
-        //call function here.
-        calculateFFT(h, w, prnuArray[i], prnuRotArray[j]);
-      }
-    }
-  }
+  // for i in prnuDomain {
+  //   for j in prnuDomain {
+  //     if (i != j) {
+  //       //call function here.
+  //       // writeln("i,j: ", i, j);
+  //       // writeln("Before computeEverything (100,100) : ", prnuArray[i](100, 100));
+  //       var prnu = prnuArray(i);
+  //       corrMatrix(i,j) = computeEverything(h, w, prnuArray(i), prnuRotArray(j));
+  //     }
+  //   }
+  // }
 
   overallTimer.stop();
 

@@ -44,4 +44,4 @@ cleanall: clean cleanslurm cleanoutput
 
 # Run the prnu
 run: 
-	./common-source-identification --writeOutput || less *.out
+	./common-source-identification --writeOutput
