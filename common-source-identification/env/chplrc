@@ -1,0 +1,24 @@
+
+# location of the installation
+export CHPL_HOME=/home/hphijma/chapel-1.18.0
+export CHPL_HOST_PLATFORM=linux64
+
+# compiler options, generate native code for infiniband and GASNet
+export CHPL_TARGET_ARCH=native
+# export CHPL_COMM=gasnet
+# export CHPL_COMM_SUBSTRATE=ibv
+# allocate memory to do networking, prevents probing
+# the probe itself resulted in a size of 15GB
+export GASNET_PHYSMEM_MAX=1G
+
+# specify how to launch jobs
+# export CHPL_LAUNCHER=slurm-gasnetrun_ibv
+# export CHPL_LAUNCHER=slurm-srun
+export CHPL_LAUNCHER_USE_SBATCH=1
+export CHPL_LAUNCHER_WALLTIME=00:15:00
+export SALLOC_PARTITION=debug
+export SLURM_PARTITION=$SALLOC_PARTITION
+
+# adding Chapel to the paths
+export PATH="$PATH:":$CHPL_HOME/bin/$CHPL_HOST_PLATFORM
+export MANPATH="$MANPATH":"$CHPL_HOME"/man

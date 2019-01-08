@@ -1,0 +1,86 @@
+#!/bin/bash
+
+function check_env_dir() {
+    local name_env_dir=$1
+    if [ -z ${!name_env_dir} ]
+    then
+	echo "Environment variable $name_env_dir has not been set"
+	exit 1
+    fi
+
+    if [ ! -d ${!name_env_dir} ]
+    then
+	echo "Environment variable $name_env_dir does not represent a directory"
+	exit 1
+    fi
+}
+
+check_env_dir COMMON_SOURCE_IDENTIFICATION_IMAGE_DIR
+
+
+DATASET_PENTAX=pentax
+DATASET_PRAKTICA=praktica
+DATASET_OLYMPOS=olympos
+
+
+declare -A DIRS
+DIRS=( [$DATASET_PENTAX]="4000x3000" [$DATASET_PRAKTICA]="2560x1920" [$DATASET_OLYMPOS]="3648x2736")
+
+BASE_DIR=$COMMON_SOURCE_IDENTIFICATION_IMAGE_DIR
+
+usage() {
+    echo "USAGE: $(basename $0) $DATASET_PENTAX|$DATASET_PRAKTICA|$DATASET_OLYMPOS <nr-images>|all"
+}
+
+check_dataset() {
+    local dataset=$1
+    if [ $dataset != $DATASET_PENTAX -a $dataset != $DATASET_PRAKTICA -a $dataset != $DATASET_OLYMPOS ]
+    then
+	usage
+	exit 1
+    fi
+}
+
+check_nr_images() {
+    local dataset=$1
+    local nrimages=$2
+    if [ $nrimages = "all" ]
+    then
+	nrimages=`ls $BASE_DIR/${DIRS[$dataset]}/*.JPG | wc -l`
+    fi
+    echo $nrimages
+}
+
+link_images() {
+    local dataset=$1
+    local nrimages=$2
+    /bin/rm -rf images
+    mkdir images
+    cd images
+    local count=0
+    for i in $BASE_DIR/${DIRS[$dataset]}/*
+    do
+	if [ $count -ge $nrimages ]
+	then
+	    break
+	fi
+	ln -s $i
+	count=$((count + 1))
+    done
+}
+
+main() {
+    if [ $# = 2 ]
+    then
+	local dataset=$1
+	local nrimages=$2
+	check_dataset $dataset
+	nrimages=$(check_nr_images $dataset $nrimages)
+	link_images $dataset $nrimages
+    else
+	usage
+	exit 1
+    fi
+}
+
+main $*

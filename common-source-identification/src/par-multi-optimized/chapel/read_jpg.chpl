@@ -1,0 +1,1 @@
+../../seq-single-naive/chapel/read_jpg.chpl
