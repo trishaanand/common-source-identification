@@ -16,6 +16,9 @@ use read_jpg;
 /* Compute PRNU noise patterns. */
 use prnu;
 
+/* user defined functions */
+use fft;
+
 /* Configuration parameters */
 config const imagedir : string = "images";
 config const writeOutput : bool = false;
@@ -26,10 +29,21 @@ proc addDirectory(fileName : string, dir : string) : string {
 }
 
 /* Get an array of the file names of the images in directory dir. */
-proc getImageFileNames(dir : string) {
+proc getImageFileNamesFullPath(dir : string) {
     var imageFiles = listdir(dir);
     sort(imageFiles);
     return addDirectory(imageFiles, dir);
+}
+
+proc getRotatedFilename(fileName: string) {
+  return "rot-" + fileName;
+}
+
+/* Get an array of the file names of the images in directory dir. */
+proc getImageFileNames(dir : string) {
+    var imageFiles = listdir(dir);
+    sort(imageFiles);
+    return imageFiles;
 }
 
 /* Write a real array to a file. */
@@ -46,9 +60,43 @@ proc write2DRealArray(array : [] real, fileName :string) {
   }
 }
 
+/* Given a file name this function calculates & returns the prnu data for that image */
+proc calculatePrnuComplex(h : int, w : int, imageFileName : string) {
+  
+  /* Create a domain for an image and allocate the image itself */
+  const imageDomain: domain(2) = {0..#h, 0..#w};
+  var image : [imageDomain] RGB;
+
+  /* allocate a prnu_data record */
+  var data : prnu_data;  
+  var prnu : [imageDomain] real;
+
+  /* Read in the first image. */
+  readJPG(image, imageFileName);
+
+  prnuInit(h, w, data);
+  prnuExecute(prnu, image, data);
+  prnuDestroy(data);
+
+  var prnuComplex = [ij in imageDomain] prnu(ij) + 0i;
+
+  return prnuComplex;
+}
+
+proc rotated180Prnu(h : int, w : int, prnu : [] complex) {
+  const imageDomain: domain(2) = {0..#h, 0..#w};
+  var prnuRot : [imageDomain] complex;
+
+  /* Rotate the matrix 180 degrees */
+  for (i,j) in imageDomain do 
+    prnuRot(i,j) = prnu(h-i-1, w-j-1);
+
+  return prnuRot;
+}
+
 proc main() {
   /* Obtain the images. */
-  var imageFileNames = getImageFileNames(imagedir);
+  var imageFileNames = getImageFileNamesFullPath(imagedir);
 
   /* n represents the number of images that have to be correlated. */
   var n = imageFileNames.size;
@@ -63,6 +111,11 @@ proc main() {
   const corrDomain : domain(2) = {1..n, 1..n};
   var corrMatrix : [corrDomain] real;
 
+  const imageDomain : domain(2) = {0..#h, 0..#w};
+  const prnuDomain : domain(1) = {1..n};
+
+  var prnuArray, prnuRotArray : [prnuDomain][imageDomain] complex;
+  
   var overallTimer : Timer;
 
   writeln("Running Common Source Identification...");
@@ -71,27 +124,23 @@ proc main() {
 
   overallTimer.start();
 
-  /* Below is example code that contains part of the pieces that you need to 
-   * compute the correlation matrix.
-   * 
-   * It shows how to read in a JPG image, how to compute a noise pattern.
-   * Modify the code to compute the correlation matrix.
-   */
-  
-  /* Create a domain for an image and allocate the image itself */
-  const imageDomain: domain(2) = {0..#h,0..#w};
-  var image : [imageDomain] RGB;
+  for i in prnuDomain {
+    prnuArray(i) = calculatePrnuComplex(h, w, imageFileNames[i]);
+    calculateFFT(prnuArray(i), FFTW_FORWARD);
+    prnuRotArray(i) = rotated180Prnu(h, w, prnuArray(i));
+    calculateFFT(prnuRotArray(i), FFTW_FORWARD);
+  }
 
-  /* Read in the first image. */
-  readJPG(image, imageFileNames.front());
-
-  /* allocate a prnu_data record */
-  var data : prnu_data;
-  var prnu : [imageDomain] real;
-
-  prnuInit(h, w, data);
-  prnuExecute(prnu, image, data);
-  prnuDestroy(data);
+  /* Calculate correlation now */
+  for (i, j) in corrDomain {
+    // Only calculating for values below the diagnol of the matrix. The upper half can simply be equated
+    // to the lower half
+    if(i > j) {
+      //call function here.
+      corrMatrix(i,j) = computeEverything(h, w, prnuArray(i), prnuRotArray(j));
+      corrMatrix(j,i) = corrMatrix(i,j);
+    }        
+  }
 
   overallTimer.stop();
 
@@ -103,7 +152,7 @@ proc main() {
   if (writeOutput) {
     writeln("Writing output files...");
     write2DRealArray(corrMatrix, "corrMatrix");
-    // for now, also write the prnu noise pattern, can be removed
-    write2DRealArray(prnu, "prnu");
   }
+
+  writeln("End");
 }
