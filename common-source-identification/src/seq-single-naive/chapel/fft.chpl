@@ -2,7 +2,7 @@ use FFTW_MT;
 use Math;
 
 proc computeEverything(h : int, w : int, prnu : [] real, prnuRot : [] real) {
-    const imageDomain: domain(2) = {0..#h,0..#w};
+    const imageDomain: domain(2) = {0..#h, 0..#w};
     var prnuComplex, prnuRotComplex, resultComplex : [imageDomain] complex;
 
     writeln("Before fft in fft (100,100) : ", prnu(100,100));
@@ -33,68 +33,49 @@ proc computeEverything(h : int, w : int, prnu : [] real, prnuRot : [] real) {
     // Calculate inverse FFT of the result
     var inverseFFT = plan_dft(resultComplex, resultComplex, FFTW_BACKWARD, FFTW_ESTIMATE);
     execute(inverseFFT);
+    
+    // Scale the result
     resultComplex /= h*w;
     writeln("after IFFT and scaling (100,100) : ", resultComplex(100,100));
-    // TODO: Create new array from the real values in resultComplex
+    
     var result : [imageDomain] real;
 
     var max, sum : real;
-    max = -1.0;
     sum = 0.0;
     var maxI, maxJ : int;
     for (i,j) in imageDomain do {
         result(i,j) = resultComplex(i,j).re;
         
-        // Scale the result
-        // result(i,j) /= h*w;
-        result(i,j) = result(i,j) * result(i,j);
-        sum += result(i,j);
         //Find the peak
         if (max < result(i,j)) {
             max = result(i,j);
             maxI = i;
             maxJ = j;
         }
-
     }
-    writeln("max i: ", maxI, " max j: ", maxJ, " peak: ", sqrt(max) );
+
+    writeln("max i: ", maxI, " max j: ", maxJ, " peak: ", max);
 
     //In the result matrix, remove 11x11 elements around the max from the total sum
     var lowI, highI, lowJ, highJ : int;
-    if ((maxI-5) < 0) {
-        lowI = 0;
-    } else {
-        lowI = maxI - 5;
-    }
-    if ((maxI + 5) > h) {
-        highI = h;
-    } else {
-        highI = maxI + 5;
-    }
-    
-    if ((maxJ-5) < 0) {
-        lowJ = 0;
-    } else {
-        lowJ = maxJ - 5;
-    }
-    if ((maxJ + 5) > w) {
-        highJ = w;
-    } else {
-        highJ = maxJ + 5;
-    } 
+    lowI = if((maxI-5) < 0) then 0 else maxI -5 ;
+    highI = if ((maxI + 5) > h) then h else maxI + 5;
+    lowJ = if ((maxJ-5) < 0) then 0 else maxJ -5;
+    highJ = if ((maxJ + 5) > w) then w else maxJ + 5;
 
-    writeln("lowI: ", lowI, " highI: ", highI, "lowJ: ", lowJ, " highJ: ", highJ);
-    const subD: domain(2) = {lowI..highI, lowJ..highJ};
-    for (i,j) in subD {
-        sum -= result(i,j);
+    writeln("lowI: ", lowI, " highI: ", highI, " lowJ: ", lowJ, " highJ: ", highJ);
+    for (i,j) in imageDomain do {
+        if(!(i > lowI && i < highI && j > lowJ && j < highJ )) {
+            sum += result(i,j) * result(i,j);
+        }
     }
     
     //Calculate average energy
     var energy : real;
-    energy = sum/((h*w) - ((highI-lowI + 1)*(highJ-lowJ + 1)));
-    // energy = sum/((h*w) - 121);
+    // energy = sum/((h*w) - ((highI-lowI + 1)*(highJ-lowJ + 1)));
+    energy = sum/((h*w) - 121);
     writeln("energy: ", energy);
-    var PCE = max/energy;
+    var PCE = (max * max) / energy;
     writeln("pce: ", PCE);
     return PCE;
 }

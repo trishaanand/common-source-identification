@@ -93,12 +93,11 @@ proc rotated180Prnu(h : int, w : int, prnu : [] real) {
 }
 
 proc main() {
-  /* Obtain the images. */
-  // images/Pentax_XXX.JPG
   writeln("Start here");
+  /* Obtain the images. */
   var imageFileNames = getImageFileNamesFullPath(imagedir);
-  // Arpit - Getting the list of files to write prnu for an image with the same filename as the original image
-  // Can also be derived by splitting the complete image but this was just easier.
+  // Getting the list of files to write prnu for an image with the same filename as the original image
+  // TODO: Can also be derived by splitting the complete image but this was just easier.
   var imageFilesPRNU = getImageFileNames(imagedir);
 
   /* n represents the number of images that have to be correlated. */
@@ -116,7 +115,7 @@ proc main() {
 
   const imageDomain : domain(2) = {0..#h, 0..#w};
   const prnuDomain : domain(1) = {1..n};
-  
+
   var prnuArray, prnuRotArray : [prnuDomain][imageDomain] real;
 
   var overallTimer : Timer;
@@ -127,23 +126,15 @@ proc main() {
 
   overallTimer.start();
 
-  /* Below is example code that contains part of the pieces that you need to 
-   * compute the correlation matrix.
-   * 
-   * It shows how to read in a JPG image, how to compute a noise pattern.
-   * Modify the code to compute the correlation matrix.
-   */
-
-  // Calculating the prnus and really trying hard to save to an array
-  var prnuI, prnuRotJ : [imageDomain] real;
-
   for i in prnuDomain {
     var prnu = calculatePrnu(h, w, imageFileNames[i]);
+    prnuArray(i) = prnu;
+    writeln("Before fft for array (100,100) : ", prnuArray(i)(100, 100));
+
     var prnuRot = rotated180Prnu(h, w, prnu);
-    prnuArray[i] = prnu;
-    writeln("Before fft for array (100,100) : ", prnuArray[i](100, 100));
     prnuRotArray(i) = prnuRot;
-    writeln("Before rotated fft for array (100,100) : ", prnuArray[i](100, 100));
+    writeln("Before rotated fft for array (100,100) : ", prnuArray(i)(100, 100));
+
     // if(writeOutput) {
     //   write2DRealArray(prnu, imageFilesPRNU[i]);
     //   write2DRealArray(prnuRot, getRotatedFilename(imageFilesPRNU[i]));
@@ -151,13 +142,14 @@ proc main() {
   }
 
   /* Calculate correlation now */
-  for i in prnuDomain {
-    for j in prnuDomain {
-      if (i != j) {
-        //call function here.
-        corrMatrix(i,j) = computeEverything(h, w, prnuArray(i), prnuRotArray(j));
-      }
-    }
+  for (i, j) in corrDomain {
+    // Only calculating for values below the diagnol of the matrix. The upper half can simply be equated
+    // to the lower half
+    if(i > j) {
+      //call function here.
+      corrMatrix(i,j) = computeEverything(h, w, prnuArray(i), prnuRotArray(j));
+      corrMatrix(j,i) = corrMatrix(i,j);
+    }        
   }
 
   overallTimer.stop();
