@@ -78,14 +78,12 @@ proc calculatePrnuComplex(h : int, w : int, imageFileName : string) {
   prnuExecute(prnu, image, data);
   prnuDestroy(data);
 
-  var prnuComplex = [ij in imageDomain] prnu(ij) + 0i;
-
-  return prnuComplex;
+  return prnu;
 }
 
-proc rotated180Prnu(h : int, w : int, prnu : [] complex) {
+proc rotated180Prnu(h : int, w : int, prnu : [] real) {
   const imageDomain: domain(2) = {0..#h, 0..#w};
-  var prnuRot : [imageDomain] complex;
+  var prnuRot : [imageDomain] real;
 
   /* Rotate the matrix 180 degrees */
   for (i,j) in imageDomain do 
@@ -114,7 +112,7 @@ proc main() {
   const imageDomain : domain(2) = {0..#h, 0..#w};
   const prnuDomain : domain(1) = {1..n};
 
-  var prnuArray, prnuRotArray : [prnuDomain][imageDomain] complex;
+  var prnuArray, prnuRotArray : [prnuDomain][imageDomain] real;
   
   var overallTimer : Timer;
 
@@ -126,9 +124,9 @@ proc main() {
 
   for i in prnuDomain {
     prnuArray(i) = calculatePrnuComplex(h, w, imageFileNames[i]);
-    calculateFFT(prnuArray(i), FFTW_FORWARD);
+    // calculateFFT(prnuArray(i), FFTW_FORWARD);
     prnuRotArray(i) = rotated180Prnu(h, w, prnuArray(i));
-    calculateFFT(prnuRotArray(i), FFTW_FORWARD);
+    // calculateFFT(prnuRotArray(i), FFTW_FORWARD);
   }
 
   /* Calculate correlation now */
