@@ -50,7 +50,7 @@ proc write2DRealArray(array : [] real, fileName :string) {
 }
 
 /* Given a file name this function calculates & returns the prnu data for that image */
-proc calculatePrnu(h : int, w : int, imageFileName : string) {
+proc calculatePrnu(h : int, w : int, imageFileName : string, prnuDomain : domain) {
   
   /* Create a domain for an image and allocate the image itself */
   const imageDomain: domain(2) = {0..#h, 0..#w};
@@ -58,7 +58,8 @@ proc calculatePrnu(h : int, w : int, imageFileName : string) {
 
   /* allocate a prnu_data record */
   var data : prnu_data;  
-  var prnu : [imageDomain] real;
+  var prnu, prnuRot : [imageDomain] real;
+  var exPrnu : [prnuDomain] real;
 
   /* Read in the first image. */
   readJPG(image, imageFileName);
@@ -67,14 +68,17 @@ proc calculatePrnu(h : int, w : int, imageFileName : string) {
   prnuExecute(prnu, image, data);
   prnuDestroy(data);
 
-  var prnuComplex, prnuRotComplex : [imageDomain] complex;
-
+  // var prnuComplex, prnuRotComplex : [imageDomain] complex;
+  // 
   // var prnuComplex = [ij in imageDomain] prnu(ij) + 0i;
-  for (i, j) in imageDomain {
-    complexAndRotate(i, j, h, w, prnu, prnuComplex, prnuRotComplex);
+  // for (i, j) in imageDomain {
+  //   complexAndRotate(i, j, h, w, prnu, prnuComplex, prnuRotComplex);
+  // }
+  // return (prnuComplex, prnuRotComplex);
+  for(i,j) in imageDomain {
+    exPrnu(i,j,0) = prnu(i,j);
   }
-
-  return (prnuComplex, prnuRotComplex);
+  return exPrnu;
 }
 
 proc complexAndRotate(i : int, j : int, h : int, w : int, 
@@ -83,19 +87,48 @@ proc complexAndRotate(i : int, j : int, h : int, w : int,
   prnuRotComplex(i,j) = prnu(h-i-1, w-j-1) + 0i;
 }
 
-proc rotated180Prnu(h : int, w : int, prnuComplex : [] complex) {
+proc rotated180Prnu(h : int, w : int, prnu : [] real, prnuDomain : domain) {
   const imageDomain: domain(2) = {0..#h, 0..#w};
-  var prnuRotComplex : [imageDomain] complex;
+  var prnuRot : [prnuDomain] real;
 
   /* Rotate the matrix 180 degrees */
   for (i,j) in imageDomain {
-    prnuRotComplex(i,j) = prnuComplex(h-i-1, w-j-1);
+    prnuRot(i,j,0) = prnu(h-i-1, w-j-1, 0);
   }
     
-  return prnuRotComplex;
+  return prnuRot;
 }
 
 proc main() {
+  run();
+  // tryRun();
+}
+
+// proc tryRun() {
+//   /* Obtain the images. */
+//   var imageFileNames = getImageFileNames(imagedir);
+
+//   /* n represents the number of images that have to be correlated. */
+//   var n = imageFileNames.size;
+
+//   /* h, w will represent the height and width of an image or PRNU noise pattern 
+//    * throughout the code.
+//    */
+//   var h, w : int;
+//   (h, w) = getDimensionsJPG(imageFileNames.front());
+
+//   const imageDomain : domain(2) = {0..#h, 0..#w};
+//   const tryDomain : domain(3) = {0..#h, 0..#w, 0..2};
+//   var tryArr : [tryDomain] real;
+//   var prnu : [imageDomain] real;
+  
+//   for(i,j) in imageDomain {
+//     tryArr(i,j,0) = prnu(i,j);
+//   }
+
+// }
+
+proc run() {
   /* Obtain the images. */
   var imageFileNames = getImageFileNames(imagedir);
 
@@ -112,10 +145,11 @@ proc main() {
   const corrDomain : domain(2) = {1..n, 1..n};
   var corrMatrix : [corrDomain] real;
 
-  const imageDomain : domain(2) = {0..#h, 0..#w};
+  const imageDomain : domain(3) = {0..#h, 0..#w, 0..#2};
   const prnuDomain : domain(1) = {1..n};
-  var prnu : [prnuDomain][imageDomain] real;
-  var prnuArray, prnuRotArray : [prnuDomain][imageDomain] complex;
+
+  var prnuArray, prnuRotArray : [prnuDomain][imageDomain] real;
+  var prnuFft, prnuRotFft : [prnuDomain][imageDomain] complex;
   
   var overallTimer : Timer;
 
@@ -128,20 +162,29 @@ proc main() {
   // prnuRotArray = [i in prnuDomain] rotated180Prnu(h, w, prnuArray(i));
   
   for i in prnuDomain {
-    (prnuArray(i), prnuRotArray(i)) = calculatePrnu(h, w, imageFileNames[i]);
-    // prnuRotArray(i) = rotated180Prnu(h, w, prnuArray(i));
+    prnuArray(i) = calculatePrnu(h, w, imageFileNames[i], imageDomain);
+    prnuRotArray(i) = rotated180Prnu(h, w, prnuArray(i), imageDomain);
 
-    calculateFFT(prnuArray(i), FFTW_FORWARD);
-    calculateFFT(prnuRotArray(i), FFTW_FORWARD);
+    // calculateFFT(prnuArray(i), FFTW_FORWARD);
+    // calculateFFT(prnuRotArray(i), FFTW_FORWARD);
+    // writeln("Before fft (100,100): ", prnuArray[i](100,100,0));
+    // writeln("Before fft rotated (100,100): ", prnuRotArray[i](100,100,0));
+    calculateFFTR2C(prnuArray(i), prnuFft(i));
+    
+    calculateFFTR2C(prnuRotArray(i), prnuRotFft(i));
+    // writeln("After fft (100, 100): ", prnuFft(i)(100,100,0));
+    // writeln("After fft rotated (100, 100): ", prnuRotFft(i)(100,100,0));
   }
 
   /* Calculate correlation now */
   for (i, j) in corrDomain {
     // Only calculating for values below the diagnol of the matrix. The upper half can simply be equated
     // to the lower half
-    if(i > j) {
+    if(i < j) {
       //call function here.
-      corrMatrix(i,j) = computeEverything(h, w, prnuArray(i), prnuRotArray(j));
+      // writeln(i, ", ", j);
+      // writeln("***********************************************");
+      corrMatrix(i,j) = computeEverything(h, w, prnuFft(i), prnuRotFft(j), imageDomain);
       corrMatrix(j,i) = corrMatrix(i,j);
     }        
   }
