@@ -1,22 +1,19 @@
 use FFTW_MT;
 use Math;
 
-/* prnu is passed by reference. Hence not returning any value from the FFT calculation */
+/* prnu is passed by reference. Hence not returning any value from the FFT calculation */ 
 proc calculateFFT(prnu : [] complex, sign : c_int) {
+    // Potentially use plan_dft_r2c which converts real arrays to complex arrays during the FFT conversion
+    // Check: https://chapel-lang.org/docs/modules/packages/FFTW.html#module-FFTW
+    // Currently, we are using complex to complex out-of-place DFT plans.
     var fftPlan = plan_dft(prnu, prnu, sign, FFTW_ESTIMATE);
     execute(fftPlan);
 }
 
-proc computeEverything(h : int, w : int, prnu : [] real, prnuRot : [] real) {
+proc computeEverything(h : int, w : int, prnuComplex : [] complex, prnuRotComplex : [] complex) {
     const imageDomain: domain(2) = {0..#h, 0..#w};
     var resultComplex : [imageDomain] complex;
     
-    var prnuComplex = [ij in imageDomain] prnu(ij) + 0i;
-    var prnuRotComplex = [ij in imageDomain] prnuRot(ij) + 0i;
-
-    calculateFFT(prnuComplex, FFTW_FORWARD);
-    calculateFFT(prnuRotComplex, FFTW_FORWARD);
-
     // Calculate the point wise product of both matrices
     for (i,j) in imageDomain do {
         resultComplex(i,j) = prnuComplex(i,j) * prnuRotComplex(i,j);

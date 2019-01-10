@@ -61,14 +61,14 @@ proc write2DRealArray(array : [] real, fileName :string) {
 }
 
 /* Given a file name this function calculates & returns the prnu data for that image */
-proc calculatePrnu(h : int, w : int, imageFileName : string) {
+proc calculatePrnuComplex(h : int, w : int, imageFileName : string) {
   
   /* Create a domain for an image and allocate the image itself */
   const imageDomain: domain(2) = {0..#h, 0..#w};
   var image : [imageDomain] RGB;
 
   /* allocate a prnu_data record */
-  var data : prnu_data;
+  var data : prnu_data;  
   var prnu : [imageDomain] real;
 
   /* Read in the first image. */
@@ -78,12 +78,13 @@ proc calculatePrnu(h : int, w : int, imageFileName : string) {
   prnuExecute(prnu, image, data);
   prnuDestroy(data);
 
-  return prnu;
+  var prnuComplex = [ij in imageDomain] prnu(ij) + 0i;
+  return prnuComplex;
 }
 
-proc rotated180Prnu(h : int, w : int, prnu : [] real) {
+proc rotated180Prnu(h : int, w : int, prnu : [] complex) {
   const imageDomain: domain(2) = {0..#h, 0..#w};
-  var prnuRot : [imageDomain] real;
+  var prnuRot : [imageDomain] complex;
 
   /* Rotate the matrix 180 degrees */
   for (i,j) in imageDomain do 
@@ -93,12 +94,8 @@ proc rotated180Prnu(h : int, w : int, prnu : [] real) {
 }
 
 proc main() {
-  writeln("Start here");
   /* Obtain the images. */
   var imageFileNames = getImageFileNamesFullPath(imagedir);
-  // Getting the list of files to write prnu for an image with the same filename as the original image
-  // TODO: Can also be derived by splitting the complete image but this was just easier.
-  var imageFilesPRNU = getImageFileNames(imagedir);
 
   /* n represents the number of images that have to be correlated. */
   var n = imageFileNames.size;
@@ -116,8 +113,8 @@ proc main() {
   const imageDomain : domain(2) = {0..#h, 0..#w};
   const prnuDomain : domain(1) = {1..n};
 
-  var prnuArray, prnuRotArray : [prnuDomain][imageDomain] real;
-
+  var prnuArray, prnuRotArray : [prnuDomain][imageDomain] complex;
+  
   var overallTimer : Timer;
 
   writeln("Running Common Source Identification...");
@@ -127,18 +124,11 @@ proc main() {
   overallTimer.start();
 
   for i in prnuDomain {
-    var prnu = calculatePrnu(h, w, imageFileNames[i]);
-    prnuArray(i) = prnu;
-    writeln("Before fft for array (100,100) : ", prnuArray(i)(100, 100));
+    prnuArray(i) = calculatePrnuComplex(h, w, imageFileNames[i]);
+    prnuRotArray(i) = rotated180Prnu(h, w, prnuArray(i));
 
-    var prnuRot = rotated180Prnu(h, w, prnu);
-    prnuRotArray(i) = prnuRot;
-    writeln("Before rotated fft for array (100,100) : ", prnuArray(i)(100, 100));
-
-    // if(writeOutput) {
-    //   write2DRealArray(prnu, imageFilesPRNU[i]);
-    //   write2DRealArray(prnuRot, getRotatedFilename(imageFilesPRNU[i]));
-    // }
+    calculateFFT(prnuArray(i), FFTW_FORWARD);
+    calculateFFT(prnuRotArray(i), FFTW_FORWARD);
   }
 
   /* Calculate correlation now */
@@ -162,8 +152,6 @@ proc main() {
   if (writeOutput) {
     writeln("Writing output files...");
     write2DRealArray(corrMatrix, "corrMatrix");
-    // for now, also write the prnu noise pattern, can be removed
-    // write2DRealArray(prnu, imageFiles.front());
   }
 
   writeln("End");

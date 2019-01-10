@@ -29,21 +29,10 @@ proc addDirectory(fileName : string, dir : string) : string {
 }
 
 /* Get an array of the file names of the images in directory dir. */
-proc getImageFileNamesFullPath(dir : string) {
-    var imageFiles = listdir(dir);
-    sort(imageFiles);
-    return addDirectory(imageFiles, dir);
-}
-
-proc getRotatedFilename(fileName: string) {
-  return "rot-" + fileName;
-}
-
-/* Get an array of the file names of the images in directory dir. */
 proc getImageFileNames(dir : string) {
     var imageFiles = listdir(dir);
     sort(imageFiles);
-    return imageFiles;
+    return addDirectory(imageFiles, dir);
 }
 
 /* Write a real array to a file. */
@@ -61,7 +50,7 @@ proc write2DRealArray(array : [] real, fileName :string) {
 }
 
 /* Given a file name this function calculates & returns the prnu data for that image */
-proc calculatePrnuComplex(h : int, w : int, imageFileName : string) {
+proc calculatePrnu(h : int, w : int, imageFileName : string) {
   
   /* Create a domain for an image and allocate the image itself */
   const imageDomain: domain(2) = {0..#h, 0..#w};
@@ -78,23 +67,37 @@ proc calculatePrnuComplex(h : int, w : int, imageFileName : string) {
   prnuExecute(prnu, image, data);
   prnuDestroy(data);
 
-  return prnu;
+  var prnuComplex, prnuRotComplex : [imageDomain] complex;
+
+  // var prnuComplex = [ij in imageDomain] prnu(ij) + 0i;
+  for (i, j) in imageDomain {
+    complexAndRotate(i, j, h, w, prnu, prnuComplex, prnuRotComplex);
+  }
+
+  return (prnuComplex, prnuRotComplex);
 }
 
-proc rotated180Prnu(h : int, w : int, prnu : [] real) {
+proc complexAndRotate(i : int, j : int, h : int, w : int, 
+                      prnu : [] real, prnuComplex : [] complex, prnuRotComplex : [] complex) {
+  prnuComplex(i,j) = prnu(i,j) + 0i;
+  prnuRotComplex(i,j) = prnu(h-i-1, w-j-1) + 0i;
+}
+
+proc rotated180Prnu(h : int, w : int, prnuComplex : [] complex) {
   const imageDomain: domain(2) = {0..#h, 0..#w};
-  var prnuRot : [imageDomain] real;
+  var prnuRotComplex : [imageDomain] complex;
 
   /* Rotate the matrix 180 degrees */
-  for (i,j) in imageDomain do 
-    prnuRot(i,j) = prnu(h-i-1, w-j-1);
-
-  return prnuRot;
+  for (i,j) in imageDomain {
+    prnuRotComplex(i,j) = prnuComplex(h-i-1, w-j-1);
+  }
+    
+  return prnuRotComplex;
 }
 
 proc main() {
   /* Obtain the images. */
-  var imageFileNames = getImageFileNamesFullPath(imagedir);
+  var imageFileNames = getImageFileNames(imagedir);
 
   /* n represents the number of images that have to be correlated. */
   var n = imageFileNames.size;
@@ -111,8 +114,8 @@ proc main() {
 
   const imageDomain : domain(2) = {0..#h, 0..#w};
   const prnuDomain : domain(1) = {1..n};
-
-  var prnuArray, prnuRotArray : [prnuDomain][imageDomain] real;
+  var prnu : [prnuDomain][imageDomain] real;
+  var prnuArray, prnuRotArray : [prnuDomain][imageDomain] complex;
   
   var overallTimer : Timer;
 
@@ -122,11 +125,14 @@ proc main() {
 
   overallTimer.start();
 
+  // prnuRotArray = [i in prnuDomain] rotated180Prnu(h, w, prnuArray(i));
+  
   for i in prnuDomain {
-    prnuArray(i) = calculatePrnuComplex(h, w, imageFileNames[i]);
-    // calculateFFT(prnuArray(i), FFTW_FORWARD);
-    prnuRotArray(i) = rotated180Prnu(h, w, prnuArray(i));
-    // calculateFFT(prnuRotArray(i), FFTW_FORWARD);
+    (prnuArray(i), prnuRotArray(i)) = calculatePrnu(h, w, imageFileNames[i]);
+    // prnuRotArray(i) = rotated180Prnu(h, w, prnuArray(i));
+
+    calculateFFT(prnuArray(i), FFTW_FORWARD);
+    calculateFFT(prnuRotArray(i), FFTW_FORWARD);
   }
 
   /* Calculate correlation now */
