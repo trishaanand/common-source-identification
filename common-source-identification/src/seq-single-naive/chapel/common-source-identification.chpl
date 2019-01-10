@@ -115,7 +115,7 @@ proc main() {
 
   var prnuArray, prnuRotArray : [prnuDomain][imageDomain] complex;
   
-  var overallTimer : Timer;
+  var overallTimer, fftTimer, corrTimer : Timer;
 
   writeln("Running Common Source Identification...");
   writeln("  ", n, " images");
@@ -123,6 +123,7 @@ proc main() {
 
   overallTimer.start();
 
+  fftTimer.start();
   for i in prnuDomain {
     prnuArray(i) = calculatePrnuComplex(h, w, imageFileNames[i]);
     prnuRotArray(i) = rotated180Prnu(h, w, prnuArray(i));
@@ -130,7 +131,9 @@ proc main() {
     calculateFFT(prnuArray(i), FFTW_FORWARD);
     calculateFFT(prnuRotArray(i), FFTW_FORWARD);
   }
+  fftTimer.stop();
 
+  corrTimer.start();
   /* Calculate correlation now */
   for (i, j) in corrDomain {
     // Only calculating for values below the diagnol of the matrix. The upper half can simply be equated
@@ -141,11 +144,13 @@ proc main() {
       corrMatrix(j,i) = corrMatrix(i,j);
     }        
   }
-
+  corrTimer.stop();
   overallTimer.stop();
 
   writeln("The first value of the corrMatrix is: ", corrMatrix[2,1]);
   writeln("Time: ", overallTimer.elapsed(), "s");
+  writeln("PRNU + FFT Time: ", fftTimer.elapsed(), "s");
+  writeln("Corr TIme : ", corrTimer.elapsed(), "s");
   var nrCorrelations = (n * (n - 1)) / 2;
   writeln("Throughput: ", nrCorrelations / overallTimer.elapsed(), " corrs/s");
 

@@ -13,13 +13,11 @@ proc calculateFFT(prnu : [] complex, sign : c_int) {
 proc calculateFFTR2C(prnu : [] real, prnuComplex : [] complex) {
     var fftPlan = plan_dft_r2c(prnu, prnuComplex, FFTW_ESTIMATE);
     execute(fftPlan);
-    return prnuComplex;
 }
 
 proc calculateFFTC2R(prnuComplex : [] complex, prnu : [] real) {
     var fftPlan = plan_dft_c2r(prnuComplex, prnu, FFTW_ESTIMATE);
     execute(fftPlan);
-    return prnuComplex;
 }
 
 proc computeEverything(h : int, w : int, prnuComplex : [] complex, prnuRotComplex : [] complex, fftDomain : domain) {
@@ -28,30 +26,20 @@ proc computeEverything(h : int, w : int, prnuComplex : [] complex, prnuRotComple
     var resultComplex : [fftDomain] complex;
     var result : [fftDomain] real;
 
-    // Calculate the point wise product of both matrices
-    // for (i,j) in imageDomain do {
-    //     resultComplex(i,j,0) = prnuComplex(i,j,0) * prnuRotComplex(i,j,0);
-    // }
-    // writeln("In computeEverything (100,100): ", prnuComplex(100,100,0));
-    // writeln("In computeEverything rotated (100,100): ", prnuRotComplex(100,100,0));
+    for (i,j) in imageDomain {
+        resultComplex(i,j,0) = prnuComplex(i,j,0) * prnuRotComplex(i,j,0);
+    }
+    // resultComplex = prnuComplex * prnuRotComplex;
 
-    resultComplex = prnuComplex * prnuRotComplex;
-
-    // writeln("After cross correlation (100,100): ", resultComplex(100, 100,0));
-    // Calculate inverse FFT of the result
-    // calculateFFT(resultComplex, FFTW_BACKWARD);
     calculateFFTC2R(resultComplex, result);
     
     // Scale the result
     result /= (h*w*2);
-    // writeln("After fft scaling (100,100)", result(100,100,0));
-
+    
     var max, sum : real;
     sum = 0.0;
     var maxI, maxJ : int;
     for (i,j) in imageDomain do {
-        // result(i,j) = resultComplex(i,j).re;
-        
         //Find the peak
         if (max < result(i,j,0)) {
             max = result(i,j,0);
@@ -60,8 +48,6 @@ proc computeEverything(h : int, w : int, prnuComplex : [] complex, prnuRotComple
         }
     }
     
-    // writeln("index of the peak: ", maxI, " ", maxJ, " peak: ", max);
-
     //In the result matrix, remove 11x11 elements around the max from the total sum
     var lowI, highI, lowJ, highJ : int;
     lowI = if((maxI-5) < 0) then 0 else maxI -5 ;
