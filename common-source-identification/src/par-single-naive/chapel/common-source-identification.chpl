@@ -24,7 +24,7 @@ use VisualDebug;
 /* Configuration parameters */
 config const imagedir : string = "images";
 config const writeOutput : bool = false;
-// var data : prnu_data;  
+var data : prnu_data;  
 
 /* Add a directory to a file name. */
 proc addDirectory(fileName : string, dir : string) : string {
@@ -53,18 +53,18 @@ proc write2DRealArray(array : [] real, fileName :string) {
 }
 
 /* Given a file name this function calculates & returns the prnu data for that image */
-proc calculatePrnu(h : int, w : int, image : [] RGB, prnuComplex : [] complex, prnuRotComplex : [] complex) {
+proc calculatePrnu(h : int, w : int, image : [] RGB, prnuComplex : [] complex, prnuRotComplex : [] complex, ref data : prnu_data) {
   
   /* Create a domain for an image and allocate the image itself */
   const imageDomain: domain(2) = {0..#h, 0..#w};
 
   /* allocate a prnu_data record */
-  var data : prnu_data;  
+  // var data : prnu_data;  
   var prnu : [imageDomain] real;
 
-  prnuInit(h, w, data);
+  // prnuInit(h, w, data);
   prnuExecute(prnu, image, data);
-  prnuDestroy(data);
+  // prnuDestroy(data);
 
   forall (i, j) in imageDomain {
     complexAndRotate(i, j, h, w, prnu, prnuComplex, prnuRotComplex);
@@ -104,10 +104,10 @@ proc run() {
   var t1Timer, t2Timer, t3Timer, t4Timer, t5Timer : real;
   var sumt1Timer, sumt2Timer, sumt3Timer, sumt4Timer, sumt5Timer : real;
 
-  // var data : [numDomain] prnu_data;  
+  var data : [numDomain] prnu_data;  
   var prnuArray, prnuRotArray : [numDomain][imageDomain] complex;
   
-  var overallTimer, fftTimer, corrTimer : Timer;
+  var overallTimer, prnuTimer, fftTimer, corrTimer : Timer;
 
   writeln("Running Common Source Identification...");
   writeln("  ", n, " images");
@@ -116,26 +116,28 @@ proc run() {
   writeln("  ", here.maxTaskPar, " maxTaskPar");
 
   /* Perform all the initializations */
-  // prnuInit(h,w,data);
-  forall i in numDomain {
+  for i in numDomain {
     readJPG(images[i], imageFileNames[i]);
-    
+    prnuInit(h,w,data(i));
   }
 
   /* Start the timer to measure the ops */
   overallTimer.start();
   
+  prnuTimer.start();
+  forall i in numDomain {
+    calculatePrnu(h, w, images[i], prnuArray(i), prnuRotArray(i), data(i));
+  }
+  prnuTimer.stop();
+
   fftTimer.start();
   for i in numDomain {
-    calculatePrnu(h, w, images[i], prnuArray(i), prnuRotArray(i));
     calculateFFT(prnuArray(i), FFTW_FORWARD);
     calculateFFT(prnuRotArray(i), FFTW_FORWARD);
   }
-
-  writeln("**************** hohohoho *********");
-
   fftTimer.stop();
 
+  
   /* Calculate correlation now */
   corrTimer.start();
   for (i, j) in corrDomain {
@@ -154,18 +156,18 @@ proc run() {
     }
   }
   corrTimer.stop();
-  writeln("**************** hahahahaha *********");
   
   overallTimer.stop();
-  // forall i in numDomain {
-  //   prnuDestroy(data[i]);
-  // }
-    // prnuDestroy(data);
+  for i in numDomain {
+    prnuDestroy(data[i]);
+  }
+  // prnuDestroy(data);
   
 
   writeln("The first value of the corrMatrix is: ", corrMatrix[2,1]);
   writeln("Time: ", overallTimer.elapsed(), "s");
-  writeln("PRNU + FFT Time: ", fftTimer.elapsed(), "s");
+  writeln("PRNU Time: ", prnuTimer.elapsed(), "s");
+  writeln("FFT Time: ", fftTimer.elapsed(), "s");
   writeln("Corr TIme : ", corrTimer.elapsed(), "s");
   // writeln("T1 Timer: ", sumt1Timer, "s");
   // writeln("T2 Timer: ", sumt2Timer, "s");

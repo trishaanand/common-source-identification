@@ -18,9 +18,9 @@ proc calculateFFT(prnu : [] complex, sign : c_int) {
     execute(fftPlan);
 }
 
-// proc planFFT(prnu : [] complex, sign : c_int) {
-//     return plan_dft(prnu, prnu, sign, FFTW_ESTIMATE);
-// }
+proc planFFT(prnu : [] complex, sign : c_int) {
+    return plan_dft(prnu, prnu, sign, FFTW_ESTIMATE);
+}
 
 proc computeEverything(h : int, w : int, prnuComplex : [] complex, prnuRotComplex : [] complex) {
     const imageDomain: domain(2) = {0..#h, 0..#w};
