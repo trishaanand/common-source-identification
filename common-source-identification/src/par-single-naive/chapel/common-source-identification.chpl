@@ -101,6 +101,8 @@ proc run() {
   const imageDomain : domain(2) = {0..#h, 0..#w};
   const numDomain : domain(1) = {1..n};
   var images : [numDomain][imageDomain] RGB;
+  var fftPlanNormal, fftPlanRotate : [numDomain] fftw_plan;
+
   var t1Timer, t2Timer, t3Timer, t4Timer, t5Timer : real;
   var sumt1Timer, sumt2Timer, sumt3Timer, sumt4Timer, sumt5Timer : real;
 
@@ -131,13 +133,27 @@ proc run() {
   prnuTimer.stop();
 
   fftTimer.start();
+  
+  //Create plans for the FFT for the prnu arrays : MUST BE SINGLE THREADED
   for i in numDomain {
-    calculateFFT(prnuArray(i), FFTW_FORWARD);
-    calculateFFT(prnuRotArray(i), FFTW_FORWARD);
+    fftPlanNormal(i) = planFFT(prnuArray(i), FFTW_FORWARD) ;
+    fftPlanRotate(i) = planFFT(prnuRotArray(i), FFTW_FORWARD) ;  
   }
+
+  sync {
+    for i in numDomain {
+      begin {execute(fftPlanNormal(i));}
+      begin {execute(fftPlanRotate(i));}
+    }
+  }
+  
+  // forall i in numDomain {
+  //   execute(fftPlanNormal(i));
+  //   execute(fftPlanRotate(i));
+  // }
+
   fftTimer.stop();
 
-  
   /* Calculate correlation now */
   corrTimer.start();
   for (i, j) in corrDomain {

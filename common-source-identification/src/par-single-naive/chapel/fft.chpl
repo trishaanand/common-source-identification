@@ -22,6 +22,7 @@ proc planFFT(prnu : [] complex, sign : c_int) {
     return plan_dft(prnu, prnu, sign, FFTW_ESTIMATE);
 }
 
+//Number of results : N*(N-1)/2
 proc computeEverything(h : int, w : int, prnuComplex : [] complex, prnuRotComplex : [] complex) {
     const imageDomain: domain(2) = {0..#h, 0..#w};
     var resultComplex : [imageDomain] complex;
