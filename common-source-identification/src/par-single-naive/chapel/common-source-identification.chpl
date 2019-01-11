@@ -19,9 +19,12 @@ use prnu;
 /* user defined functions */
 use fft;
 
+use VisualDebug;
+
 /* Configuration parameters */
 config const imagedir : string = "images";
 config const writeOutput : bool = false;
+var data : prnu_data;  
 
 /* Add a directory to a file name. */
 proc addDirectory(fileName : string, dir : string) : string {
@@ -50,31 +53,22 @@ proc write2DRealArray(array : [] real, fileName :string) {
 }
 
 /* Given a file name this function calculates & returns the prnu data for that image */
-proc calculatePrnu(h : int, w : int, imageFileName : string) {
+proc calculatePrnu(h : int, w : int, image : [] RGB, prnuComplex : [] complex, prnuRotComplex : [] complex) {
   
   /* Create a domain for an image and allocate the image itself */
   const imageDomain: domain(2) = {0..#h, 0..#w};
-  var image : [imageDomain] RGB;
 
   /* allocate a prnu_data record */
-  var data : prnu_data;  
+  // var data : prnu_data;  
   var prnu : [imageDomain] real;
 
-  /* Read in the first image. */
-  readJPG(image, imageFileName);
-
-  prnuInit(h, w, data);
+  // prnuInit(h, w, data);
   prnuExecute(prnu, image, data);
-  prnuDestroy(data);
+  // prnuDestroy(data);
 
-  var prnuComplex, prnuRotComplex : [imageDomain] complex;
-
-  // var prnuComplex = [ij in imageDomain] prnu(ij) + 0i;
-  for (i, j) in imageDomain {
+  forall (i, j) in imageDomain {
     complexAndRotate(i, j, h, w, prnu, prnuComplex, prnuRotComplex);
   }
-
-  return (prnuComplex, prnuRotComplex);
 }
 
 proc complexAndRotate(i : int, j : int, h : int, w : int, 
@@ -83,19 +77,11 @@ proc complexAndRotate(i : int, j : int, h : int, w : int,
   prnuRotComplex(i,j) = prnu(h-i-1, w-j-1) + 0i;
 }
 
-proc rotated180Prnu(h : int, w : int, prnuComplex : [] complex) {
-  const imageDomain: domain(2) = {0..#h, 0..#w};
-  var prnuRotComplex : [imageDomain] complex;
-
-  /* Rotate the matrix 180 degrees */
-  for (i,j) in imageDomain {
-    prnuRotComplex(i,j) = prnuComplex(h-i-1, w-j-1);
-  }
-    
-  return prnuRotComplex;
+proc main() {
+  run();
 }
 
-proc main() {
+proc run() {
   /* Obtain the images. */
   var imageFileNames = getImageFileNames(imagedir);
 
@@ -113,51 +99,80 @@ proc main() {
   var corrMatrix : [corrDomain] real;
 
   const imageDomain : domain(2) = {0..#h, 0..#w};
-  const prnuDomain : domain(1) = {1..n};
-  var prnu : [prnuDomain][imageDomain] real;
-  var prnuArray, prnuRotArray : [prnuDomain][imageDomain] complex;
+  const numDomain : domain(1) = {1..n};
+  var images : [numDomain][imageDomain] RGB;
+  var t1Timer, t2Timer, t3Timer, t4Timer, t5Timer : real;
+  var sumt1Timer, sumt2Timer, sumt3Timer, sumt4Timer, sumt5Timer : real;
+
+  // var data : [numDomain] prnu_data;  
+  var prnuArray, prnuRotArray : [numDomain][imageDomain] complex;
   
   var overallTimer, fftTimer, corrTimer : Timer;
 
   writeln("Running Common Source Identification...");
   writeln("  ", n, " images");
   writeln("  ", numLocales, " locale(s)");
+  writeln("  ", here.numPUs(false, true), " cores");
+  writeln("  ", here.maxTaskPar, " maxTaskPar");
 
+  /* Perform all the initializations */
+  prnuInit(h,w,data);
+  forall i in numDomain {
+    readJPG(images[i], imageFileNames[i]);
+    
+  }
+
+  /* Start the timer to measure the ops */
   overallTimer.start();
-
-  // prnuRotArray = [i in prnuDomain] rotated180Prnu(h, w, prnuArray(i));
+  
   fftTimer.start();
-
-  for i in prnuDomain {
-    (prnuArray(i), prnuRotArray(i)) = calculatePrnu(h, w, imageFileNames[i]);
-    // prnuRotArray(i) = rotated180Prnu(h, w, prnuArray(i));
-
+  for i in numDomain {
+    calculatePrnu(h, w, images[i], prnuArray(i), prnuRotArray(i));
     calculateFFT(prnuArray(i), FFTW_FORWARD);
     calculateFFT(prnuRotArray(i), FFTW_FORWARD);
   }
 
+  writeln("**************** hohohoho *********");
+
   fftTimer.stop();
+
   /* Calculate correlation now */
-
   corrTimer.start();
-
   for (i, j) in corrDomain {
     // Only calculating for values below the diagnol of the matrix. The upper half can simply be equated
     // to the lower half
-    if(i > j) {
+    if(i < j) {
       //call function here.
-      corrMatrix(i,j) = computeEverything(h, w, prnuArray(i), prnuRotArray(j));
+      // writeln("************** i,j: ", i, " ", j);
+      (corrMatrix(i,j), t1Timer, t2Timer, t3Timer, t4Timer, t5Timer) = computeEverything(h, w, prnuArray(i), prnuRotArray(j));
       corrMatrix(j,i) = corrMatrix(i,j);
-    }        
+      // sumt1Timer += t1Timer;
+      // sumt2Timer += t2Timer;
+      // sumt3Timer += t3Timer;
+      // sumt4Timer += t4Timer;
+      // sumt5Timer += t5Timer;
+    }
   }
-
   corrTimer.stop();
+  writeln("**************** hahahahaha *********");
+  
   overallTimer.stop();
+  // forall i in numDomain {
+  //   prnuDestroy(data[i]);
+  // }
+    prnuDestroy(data);
+  
 
   writeln("The first value of the corrMatrix is: ", corrMatrix[2,1]);
   writeln("Time: ", overallTimer.elapsed(), "s");
   writeln("PRNU + FFT Time: ", fftTimer.elapsed(), "s");
   writeln("Corr TIme : ", corrTimer.elapsed(), "s");
+  // writeln("T1 Timer: ", sumt1Timer, "s");
+  // writeln("T2 Timer: ", sumt2Timer, "s");
+  // writeln("T3 Timer: ", sumt3Timer, "s");
+  // writeln("T4 Timer: ", sumt4Timer, "s");
+  // writeln("T5 Timer: ", sumt5Timer, "s");
+
   var nrCorrelations = (n * (n - 1)) / 2;
   writeln("Throughput: ", nrCorrelations / overallTimer.elapsed(), " corrs/s");
 

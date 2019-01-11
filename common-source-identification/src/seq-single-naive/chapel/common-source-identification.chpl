@@ -22,6 +22,7 @@ use fft;
 /* Configuration parameters */
 config const imagedir : string = "images";
 config const writeOutput : bool = false;
+var data : prnu_data;  
 
 /* Add a directory to a file name. */
 proc addDirectory(fileName : string, dir : string) : string {
@@ -61,24 +62,24 @@ proc write2DRealArray(array : [] real, fileName :string) {
 }
 
 /* Given a file name this function calculates & returns the prnu data for that image */
-proc calculatePrnuComplex(h : int, w : int, imageFileName : string) {
+proc calculatePrnuComplex(h : int, w : int, image : [] RGB) {
   
   /* Create a domain for an image and allocate the image itself */
   const imageDomain: domain(2) = {0..#h, 0..#w};
-  var image : [imageDomain] RGB;
 
   /* allocate a prnu_data record */
-  var data : prnu_data;  
+  
   var prnu : [imageDomain] real;
-
-  /* Read in the first image. */
-  readJPG(image, imageFileName);
-
-  prnuInit(h, w, data);
+  var prnuComplex : [imageDomain] complex; 
+  
+  // prnuInit(h, w, data);
   prnuExecute(prnu, image, data);
-  prnuDestroy(data);
+  // prnuDestroy(data);
 
-  var prnuComplex = [ij in imageDomain] prnu(ij) + 0i;
+  for(i,j) in imageDomain {
+    prnuComplex(i,j) = prnu(i,j) + 0i;
+  }
+
   return prnuComplex;
 }
 
@@ -109,11 +110,15 @@ proc main() {
   /* Create a domain for the correlation matrix. */
   const corrDomain : domain(2) = {1..n, 1..n};
   var corrMatrix : [corrDomain] real;
+  var t1Timer, t2Timer, t3Timer, t4Timer, t5Timer : real;
+  var sumt1Timer, sumt2Timer, sumt3Timer, sumt4Timer, sumt5Timer : real;
+
 
   const imageDomain : domain(2) = {0..#h, 0..#w};
-  const prnuDomain : domain(1) = {1..n};
+  const numDomain : domain(1) = {1..n};
+  var images : [numDomain][imageDomain] RGB;
 
-  var prnuArray, prnuRotArray : [prnuDomain][imageDomain] complex;
+  var prnuArray, prnuRotArray : [numDomain][imageDomain] complex;
   
   var overallTimer, fftTimer, corrTimer : Timer;
 
@@ -121,11 +126,17 @@ proc main() {
   writeln("  ", n, " images");
   writeln("  ", numLocales, " locale(s)");
 
+  /* Perform all initializations here */
+  prnuInit(h, w, data);
+  for i in numDomain {
+    readJPG(images[i], imageFileNames[i]);
+  }
+
   overallTimer.start();
   fftTimer.start();
 
-  for i in prnuDomain {
-    prnuArray(i) = calculatePrnuComplex(h, w, imageFileNames[i]);
+  for i in numDomain {
+    prnuArray(i) = calculatePrnuComplex(h, w, images[i]);
     prnuRotArray(i) = rotated180Prnu(h, w, prnuArray(i));
 
     calculateFFT(prnuArray(i), FFTW_FORWARD);
@@ -142,18 +153,29 @@ proc main() {
     // to the lower half
     if(i > j) {
       //call function here.
-      corrMatrix(i,j) = computeEverything(h, w, prnuArray(i), prnuRotArray(j));
+      (corrMatrix(i,j), t1Timer, t2Timer, t3Timer, t4Timer, t5Timer) = computeEverything(h, w, prnuArray(i), prnuRotArray(j));
       corrMatrix(j,i) = corrMatrix(i,j);
+      sumt1Timer += t1Timer;
+      sumt2Timer += t2Timer;
+      sumt3Timer += t3Timer;
+      sumt4Timer += t4Timer;
+      sumt5Timer += t5Timer;
     }        
   }
 
   corrTimer.stop();
   overallTimer.stop();
+  prnuDestroy(data);
 
   writeln("The first value of the corrMatrix is: ", corrMatrix[2,1]);
   writeln("Time: ", overallTimer.elapsed(), "s");
   writeln("PRNU + FFT Time: ", fftTimer.elapsed(), "s");
   writeln("Corr TIme : ", corrTimer.elapsed(), "s");
+  writeln("T1 Timer: ", sumt1Timer, "s");
+  writeln("T2 Timer: ", sumt2Timer, "s");
+  writeln("T3 Timer: ", sumt3Timer, "s");
+  writeln("T4 Timer: ", sumt4Timer, "s");
+  writeln("T5 Timer: ", sumt5Timer, "s");
 
   var nrCorrelations = (n * (n - 1)) / 2;
   writeln("Throughput: ", nrCorrelations / overallTimer.elapsed(), " corrs/s");
