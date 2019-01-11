@@ -24,7 +24,7 @@ use VisualDebug;
 /* Configuration parameters */
 config const imagedir : string = "images";
 config const writeOutput : bool = false;
-var data : prnu_data;  
+// var data : prnu_data;  
 
 /* Add a directory to a file name. */
 proc addDirectory(fileName : string, dir : string) : string {
@@ -59,12 +59,12 @@ proc calculatePrnu(h : int, w : int, image : [] RGB, prnuComplex : [] complex, p
   const imageDomain: domain(2) = {0..#h, 0..#w};
 
   /* allocate a prnu_data record */
-  // var data : prnu_data;  
+  var data : prnu_data;  
   var prnu : [imageDomain] real;
 
-  // prnuInit(h, w, data);
+  prnuInit(h, w, data);
   prnuExecute(prnu, image, data);
-  // prnuDestroy(data);
+  prnuDestroy(data);
 
   forall (i, j) in imageDomain {
     complexAndRotate(i, j, h, w, prnu, prnuComplex, prnuRotComplex);
@@ -116,7 +116,7 @@ proc run() {
   writeln("  ", here.maxTaskPar, " maxTaskPar");
 
   /* Perform all the initializations */
-  prnuInit(h,w,data);
+  // prnuInit(h,w,data);
   forall i in numDomain {
     readJPG(images[i], imageFileNames[i]);
     
@@ -160,7 +160,7 @@ proc run() {
   // forall i in numDomain {
   //   prnuDestroy(data[i]);
   // }
-    prnuDestroy(data);
+    // prnuDestroy(data);
   
 
   writeln("The first value of the corrMatrix is: ", corrMatrix[2,1]);
