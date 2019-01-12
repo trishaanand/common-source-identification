@@ -22,39 +22,31 @@ proc planFFT(prnu : [] complex, sign : c_int) {
     return plan_dft(prnu, prnu, sign, FFTW_ESTIMATE);
 }
 
-proc computeEverything(h : int, w : int, result : [] real) {
+proc getMax(result : [] real, h : int, w : int) {
     const imageDomain: domain(2) = {0..#h, 0..#w};
-    
-    var max : real;
-    var maxI, maxJ : int;
-    
-    var (maxVal, maxLoc) = maxloc reduce zip(result, imageDomain);
-    max = maxVal;
-    maxI = maxLoc(1);
-    maxJ = maxLoc(2);
-
-    //In the result matrix, remove 11x11 elements around the max from the total sum
     var lowI, highI, lowJ, highJ : int;
+    var (max, maxLoc) = maxloc reduce zip(result, imageDomain);
+
+    var maxI = maxLoc(1);
+    var maxJ = maxLoc(2);
     lowI = if((maxI-5) < 0) then 0 else maxI -5 ;
     highI = if ((maxI + 5) > h) then h else maxI + 5;
     lowJ = if ((maxJ-5) < 0) then 0 else maxJ -5;
     highJ = if ((maxJ + 5) > w) then w else maxJ + 5;
+    
+    return (max, lowI, highI, lowJ, highJ);
+}
 
-    // var innerDomain : domain(2) = {lowI..highI-1, lowJ..highJ-1};
-    // var ignoreSum = + reduce result[innerDomain];
-    // // writeln("Ignore sum is ", ignoreSum);
-    // var sum = + reduce result;
-    // // writeln("Total sum via reduce is ", sum, "and sum after ignoring is : ", (sum - ignoreSum));
-    // sum = sum - ignoreSum;
-    var sum=0.0;
-    // var ignoreSum1 =0.0;
-    for (i,j) in imageDomain {
-        if(!(i > lowI && i < highI && j > lowJ && j < highJ )) {
-            sum += result(i,j);
-        // } else {
-        //     ignoreSum1 += result(i,j);
-        }
-    }
+proc computeEverything(h : int, w : int, result : [] real) {
+    const imageDomain: domain(2) = {0..#h, 0..#w};
+
+    var (max, lowI, highI, lowJ, highJ) = getMax(result, h, w);
+    var sum = + reduce result;
+    
+    var innerDomain : subdomain(imageDomain) = {lowI..highI-1, lowJ..highJ-1};
+    var ignoreSum = + reduce result[innerDomain];
+    
+    sum = sum - ignoreSum;
 
     //Calculate average energy
     var energy : real;
