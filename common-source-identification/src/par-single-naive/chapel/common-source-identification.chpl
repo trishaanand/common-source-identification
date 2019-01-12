@@ -94,9 +94,9 @@ proc run() {
 
   const imageDomain : domain(2) = {0..#h, 0..#w};
   const numDomain : domain(1) = {1..n};
-  var crossNum = n * (n - 1) / 2;
+  var crossNum = n * (n-1) / 2;
   const crossDomain : domain(1) = {0..#crossNum};
-
+  
   var images : [numDomain][imageDomain] RGB;
   var fftPlanNormal, fftPlanRotate : [numDomain] fftw_plan;
 
@@ -106,9 +106,11 @@ proc run() {
   var data : [numDomain] prnu_data;  
   var prnus : [numDomain][imageDomain] real;
   var prnuArray, prnuRotArray : [numDomain][imageDomain] complex;
-  var resultComplex : [crossDomain] complex;
-  var overallTimer, prnuTimer, fftTimer, corrTimer : Timer;
+  var overallTimer, prnuTimer, fftTimer, corrTimer, crossTimer : Timer;
 
+  var resultComplex : [crossDomain][imageDomain] complex;
+  var crossTuples : [crossDomain] 2*int;
+  
   writeln("Running Common Source Identification...");
   writeln("  ", n, " images");
   writeln("  ", numLocales, " locale(s)");
@@ -130,9 +132,8 @@ proc run() {
   }
   prnuTimer.stop();
 
-  fftTimer.start();
-  
   //Create plans for the FFT for the prnu arrays : MUST BE SINGLE THREADED
+  fftTimer.start();
   for i in numDomain {
     fftPlanNormal(i) = planFFT(prnuArray(i), FFTW_FORWARD) ;
     fftPlanRotate(i) = planFFT(prnuRotArray(i), FFTW_FORWARD) ;  
@@ -144,18 +145,30 @@ proc run() {
       begin {execute(fftPlanRotate(i));}
     }
   }
-
   fftTimer.stop();
 
+
   /* Calculate correlation now */
+  crossTimer.start();
+  forall (i, j) in corrDomain {
+    if(i > j) {
+      //call function here.
+      var idx = (((i-1) * (i - 1 -1)) / 2 ) + (j - 1);
+      crossTuples(idx) = (i,j);
+      resultComplex(idx) = prnuArray(i) * prnuRotArray(j);
+    }
+  }
+  crossTimer.stop();
+  
   corrTimer.start();
   for (i, j) in corrDomain {
     // Only calculating for values below the diagnol of the matrix. The upper half can simply be equated
     // to the lower half
-    if(i < j) {
+    if(i > j) {
       //call function here.
       // writeln("************** i,j: ", i, " ", j);
-      (corrMatrix(i,j), t1Timer, t2Timer, t3Timer, t4Timer, t5Timer) = computeEverything(h, w, prnuArray(i), prnuRotArray(j));
+      var idx = (((i-1) * (i - 1 -1)) / 2 ) + (j - 1);
+      (corrMatrix(i,j), t1Timer, t2Timer, t3Timer, t4Timer, t5Timer) = computeEverything(h, w, resultComplex(idx));
       corrMatrix(j,i) = corrMatrix(i,j);
       // sumt1Timer += t1Timer;
       // sumt2Timer += t2Timer;
@@ -170,13 +183,13 @@ proc run() {
   for i in numDomain {
     prnuDestroy(data[i]);
   }
-  // prnuDestroy(data);
   
 
   writeln("The first value of the corrMatrix is: ", corrMatrix[2,1]);
   writeln("Time: ", overallTimer.elapsed(), "s");
   writeln("PRNU Time: ", prnuTimer.elapsed(), "s");
   writeln("FFT Time: ", fftTimer.elapsed(), "s");
+  writeln("Cross Time : ", crossTimer.elapsed(), "s");
   writeln("Corr TIme : ", corrTimer.elapsed(), "s");
   // writeln("T1 Timer: ", sumt1Timer, "s");
   // writeln("T2 Timer: ", sumt2Timer, "s");

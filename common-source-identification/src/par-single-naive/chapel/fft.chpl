@@ -23,9 +23,9 @@ proc planFFT(prnu : [] complex, sign : c_int) {
 }
 
 //Number of results : N*(N-1)/2
-proc computeEverything(h : int, w : int, prnuComplex : [] complex, prnuRotComplex : [] complex) {
+proc computeEverything(h : int, w : int, resultComplex : [] complex) {
     const imageDomain: domain(2) = {0..#h, 0..#w};
-    var resultComplex : [imageDomain] complex;
+    // var resultComplex : [imageDomain] complex;
     
     var t1Timer, t2Timer, t3Timer, t4Timer, t5Timer : Timer;
 
@@ -33,9 +33,9 @@ proc computeEverything(h : int, w : int, prnuComplex : [] complex, prnuRotComple
     // writeln("In computeEverthign rotated, (100,100): ", prnuRotComplex(100,100));
     // Calculate the point wise product of both matrices
     
-    t1Timer.start();
-    resultComplex = prnuComplex * prnuRotComplex;
-    t1Timer.stop();
+    // t1Timer.start();
+    // resultComplex = prnuComplex * prnuRotComplex;
+    // t1Timer.stop();
     
     // writeln("after cross correlation, (100,100): ", resultComplex(100,100));
 
