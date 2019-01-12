@@ -173,11 +173,17 @@ proc run() {
     execute(fftPlanBack(idx));
   }
 
+
   forall (idx) in crossDomain {
-      //call function here.
-      var (i,j) = crossTuples(idx);
-      corrMatrix(i,j) = computeEverything(h, w, resultComplex(idx));
-      corrMatrix(j,i) = corrMatrix(i,j);
+    //Save the real part of result array, scale and square it.
+    var result : [imageDomain] real;
+    result = resultComplex(idx).re;
+    result = (result * result) / ((h*w) * (h*w)); 
+  
+    //call function here.
+    var (i,j) = crossTuples(idx);
+    corrMatrix(i,j) = computeEverything(h, w, result);
+    corrMatrix(j,i) = corrMatrix(i,j);
   }
   corrTimer.stop();
   
