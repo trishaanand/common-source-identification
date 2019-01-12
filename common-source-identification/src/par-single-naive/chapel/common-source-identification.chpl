@@ -99,6 +99,7 @@ proc run() {
   
   var images : [numDomain][imageDomain] RGB;
   var fftPlanNormal, fftPlanRotate : [numDomain] fftw_plan;
+  var fftPlanBack : [crossDomain] fftw_plan;
 
   var t1Timer, t2Timer, t3Timer, t4Timer, t5Timer : real;
   var sumt1Timer, sumt2Timer, sumt3Timer, sumt4Timer, sumt5Timer : real;
@@ -147,10 +148,11 @@ proc run() {
   }
   fftTimer.stop();
 
-
-  /* Calculate correlation now */
+  // Calculate the point wise product of both matrices
   crossTimer.start();
   forall (i, j) in corrDomain {
+    // Only calculating for values below the diagnol of the matrix. The upper half can simply be equated
+    // to the lower half
     if(i > j) {
       //call function here.
       var idx = (((i-1) * (i - 1 -1)) / 2 ) + (j - 1);
@@ -160,22 +162,22 @@ proc run() {
   }
   crossTimer.stop();
   
+
+  // Plan all the FFTs for the resultComplex in a serialized fashion
   corrTimer.start();
-  for (i, j) in corrDomain {
-    // Only calculating for values below the diagnol of the matrix. The upper half can simply be equated
-    // to the lower half
-    if(i > j) {
+  for idx in crossDomain {
+    fftPlanBack(idx) = planFFT(resultComplex(idx), FFTW_BACKWARD) ; 
+  }
+
+  forall idx in crossDomain {
+    execute(fftPlanBack(idx));
+  }
+
+  forall (idx) in crossDomain {
       //call function here.
-      // writeln("************** i,j: ", i, " ", j);
-      var idx = (((i-1) * (i - 1 -1)) / 2 ) + (j - 1);
-      (corrMatrix(i,j), t1Timer, t2Timer, t3Timer, t4Timer, t5Timer) = computeEverything(h, w, resultComplex(idx));
+      var (i,j) = crossTuples(idx);
+      corrMatrix(i,j) = computeEverything(h, w, resultComplex(idx));
       corrMatrix(j,i) = corrMatrix(i,j);
-      // sumt1Timer += t1Timer;
-      // sumt2Timer += t2Timer;
-      // sumt3Timer += t3Timer;
-      // sumt4Timer += t4Timer;
-      // sumt5Timer += t5Timer;
-    }
   }
   corrTimer.stop();
   
@@ -184,18 +186,12 @@ proc run() {
     prnuDestroy(data[i]);
   }
   
-
   writeln("The first value of the corrMatrix is: ", corrMatrix[2,1]);
   writeln("Time: ", overallTimer.elapsed(), "s");
   writeln("PRNU Time: ", prnuTimer.elapsed(), "s");
   writeln("FFT Time: ", fftTimer.elapsed(), "s");
   writeln("Cross Time : ", crossTimer.elapsed(), "s");
   writeln("Corr TIme : ", corrTimer.elapsed(), "s");
-  // writeln("T1 Timer: ", sumt1Timer, "s");
-  // writeln("T2 Timer: ", sumt2Timer, "s");
-  // writeln("T3 Timer: ", sumt3Timer, "s");
-  // writeln("T4 Timer: ", sumt4Timer, "s");
-  // writeln("T5 Timer: ", sumt5Timer, "s");
 
   var nrCorrelations = (n * (n - 1)) / 2;
   writeln("Throughput: ", nrCorrelations / overallTimer.elapsed(), " corrs/s");

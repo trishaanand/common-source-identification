@@ -25,41 +25,19 @@ proc planFFT(prnu : [] complex, sign : c_int) {
 //Number of results : N*(N-1)/2
 proc computeEverything(h : int, w : int, resultComplex : [] complex) {
     const imageDomain: domain(2) = {0..#h, 0..#w};
-    // var resultComplex : [imageDomain] complex;
     
-    var t1Timer, t2Timer, t3Timer, t4Timer, t5Timer : Timer;
-
-    // writeln("In computeEverthign, (100,100): ", prnuComplex(100,100));
-    // writeln("In computeEverthign rotated, (100,100): ", prnuRotComplex(100,100));
-    // Calculate the point wise product of both matrices
-    
-    // t1Timer.start();
-    // resultComplex = prnuComplex * prnuRotComplex;
-    // t1Timer.stop();
-    
-    // writeln("after cross correlation, (100,100): ", resultComplex(100,100));
-
-    // Calculate inverse FFT of the result
-    t2Timer.start();
-    calculateFFT(resultComplex, FFTW_BACKWARD);
-    t2Timer.stop();
-
     var result : [imageDomain] real;
     var max : real;
     var maxI, maxJ : int;
     
     // Scale the result and square the real component
-    t3Timer.start();
     result = resultComplex.re;
     result = (result * result) / ((h*w) * (h*w)); 
-    t3Timer.stop();
 
-    t4Timer.start();
     var (maxVal, maxLoc) = maxloc reduce zip(result, imageDomain);
     max = maxVal;
     maxI = maxLoc(1);
     maxJ = maxLoc(2);
-    t4Timer.stop();
 
     //In the result matrix, remove 11x11 elements around the max from the total sum
     var lowI, highI, lowJ, highJ : int;
@@ -68,7 +46,6 @@ proc computeEverything(h : int, w : int, resultComplex : [] complex) {
     lowJ = if ((maxJ-5) < 0) then 0 else maxJ -5;
     highJ = if ((maxJ + 5) > w) then w else maxJ + 5;
 
-    t5Timer.start();
     // var innerDomain : domain(2) = {lowI..highI-1, lowJ..highJ-1};
     // var ignoreSum = + reduce result[innerDomain];
     // // writeln("Ignore sum is ", ignoreSum);
@@ -84,12 +61,11 @@ proc computeEverything(h : int, w : int, resultComplex : [] complex) {
         //     ignoreSum1 += result(i,j);
         }
     }
-    t5Timer.stop();
 
     //Calculate average energy
     var energy : real;
     // energy = sum/((h*w) - ((highI-lowI + 1)*(highJ-lowJ + 1)));
     energy = sum/((h*w) - 121);
     var PCE = (max) / energy;
-    return (PCE, t1Timer.elapsed(), t2Timer.elapsed(), t3Timer.elapsed(), t4Timer.elapsed(), t5Timer.elapsed());
+    return PCE;
 }
