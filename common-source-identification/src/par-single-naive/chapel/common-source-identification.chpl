@@ -53,18 +53,12 @@ proc write2DRealArray(array : [] real, fileName :string) {
 }
 
 /* Given a file name this function calculates & returns the prnu data for that image */
-proc calculatePrnu(h : int, w : int, image : [] RGB, prnuComplex : [] complex, prnuRotComplex : [] complex, ref data : prnu_data) {
+proc calculatePrnu(h : int, w : int, image : [] RGB, prnu : [] real, prnuComplex : [] complex, prnuRotComplex : [] complex, ref data : prnu_data) {
   
   /* Create a domain for an image and allocate the image itself */
   const imageDomain: domain(2) = {0..#h, 0..#w};
 
-  /* allocate a prnu_data record */
-  // var data : prnu_data;  
-  var prnu : [imageDomain] real;
-
-  // prnuInit(h, w, data);
   prnuExecute(prnu, image, data);
-  // prnuDestroy(data);
 
   forall (i, j) in imageDomain {
     complexAndRotate(i, j, h, w, prnu, prnuComplex, prnuRotComplex);
@@ -100,6 +94,9 @@ proc run() {
 
   const imageDomain : domain(2) = {0..#h, 0..#w};
   const numDomain : domain(1) = {1..n};
+  var crossNum = n * (n - 1) / 2;
+  const crossDomain : domain(1) = {0..#crossNum};
+
   var images : [numDomain][imageDomain] RGB;
   var fftPlanNormal, fftPlanRotate : [numDomain] fftw_plan;
 
@@ -107,8 +104,9 @@ proc run() {
   var sumt1Timer, sumt2Timer, sumt3Timer, sumt4Timer, sumt5Timer : real;
 
   var data : [numDomain] prnu_data;  
+  var prnus : [numDomain][imageDomain] real;
   var prnuArray, prnuRotArray : [numDomain][imageDomain] complex;
-  
+  var resultComplex : [crossDomain] complex;
   var overallTimer, prnuTimer, fftTimer, corrTimer : Timer;
 
   writeln("Running Common Source Identification...");
@@ -128,7 +126,7 @@ proc run() {
   
   prnuTimer.start();
   forall i in numDomain {
-    calculatePrnu(h, w, images[i], prnuArray(i), prnuRotArray(i), data(i));
+    calculatePrnu(h, w, images[i], prnus[i], prnuArray(i), prnuRotArray(i), data(i));
   }
   prnuTimer.stop();
 
@@ -146,11 +144,6 @@ proc run() {
       begin {execute(fftPlanRotate(i));}
     }
   }
-  
-  // forall i in numDomain {
-  //   execute(fftPlanNormal(i));
-  //   execute(fftPlanRotate(i));
-  // }
 
   fftTimer.stop();
 
