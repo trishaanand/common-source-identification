@@ -55,19 +55,6 @@ proc write2DRealArray(array : [] real, fileName :string) {
   }
 }
 
-/* Given a file name this function calculates & returns the prnu data for that image */
-proc calculatePrnu(h : int, w : int, image : [] RGB, prnu : [] real, prnuComplex : [] complex, prnuRotComplex : [] complex, ref data : prnu_data) {
-  
-  /* Create a domain for an image and allocate the image itself */
-  const imageDomain: domain(2) = {0..#h, 0..#w};
-
-  prnuExecute(prnu, image, data);
-
-  forall (i, j) in imageDomain {
-    complexAndRotate(i, j, h, w, prnu, prnuComplex, prnuRotComplex);
-  }
-}
-
 proc complexAndRotate(i : int, j : int, h : int, w : int, 
                       prnu : [] real, prnuComplex : [] complex, prnuRotComplex : [] complex) {
   prnuComplex(i,j) = prnu(i,j) + 0i;
@@ -79,6 +66,11 @@ proc main() {
   run();
 }
 
+proc printLocales(a) {
+  forall i in a do i = i.locale.id;
+  writeln(a);
+  writeln();
+}
 
 proc tryRun() {
   /* Obtain the images. */
@@ -94,23 +86,46 @@ proc tryRun() {
   (h, w) = getDimensionsJPG(imageFileNames.front());
 
   const imageDomain : domain(2) = {0..#h, 0..#w};
-  const numDomain = {1..n} dmapped Block({1..n});
+  const numDomain : domain(1) = {1..n};
   
-  var images : [numDomain][imageDomain] RGB;
+  var crossNum = n * (n-1) / 2;
+  const crossDomain = {0..#crossNum} dmapped Block({0..#crossNum});
+  var testArr : [crossDomain] int;
+
+  printLocales(testArr);
+  const corrDomain : domain(2) = {1..n, 1..n};
+  var crossTuples : [crossDomain] 2*int;
+  
+  // var images : [numDomain][imageDomain] RGB;
   
   writeln("Running Common Source Identification...");
   writeln("  ", n, " images");
   writeln("  ", numLocales, " locale(s)");
   
-  // startVdebug("vdata");
-  for i in numDomain {
-    var image : [imageDomain] RGB;
-    on Locales[i % numLocales] do {
-      // writeln("i : ", i, " on locale : ", here.id);
+  forall (i,j) in corrDomain {
+    if (i > j) {
+      var idx = (((i-1) * (i - 1 -1)) / 2 ) + (j - 1);
+      crossTuples(idx) = (i-1,j-1);
     }
   }
-  // stopVdebug();
-  // writeln("End of execution");
+
+  forall loc in Locales {
+    on loc do {
+      var subNumDomainPRNU : sparse subdomain(numDomain);
+      var subNumDomainROT : sparse subdomain(numDomain);
+      var arr : [subNumDomainPRNU] real; 
+      for idx in crossDomain.localSubdomain() {
+        var (x,y)= crossTuples(idx);
+        subNumDomainPRNU += x;
+        subNumDomainROT += y;
+        writeln("subNumDomainPRNU IRV: ", arr.IRV);
+        writeln("On locale ", here.id, " tuple stored in the sparse domain is : ", crossTuples(idx));
+      }
+    }
+  }
+
+
+  writeln("End of execution");
 }
 
 
@@ -132,133 +147,120 @@ proc run() {
   var corrMatrix : [corrDomain] real;
 
   const imageDomain : domain(2) = {0..#h, 0..#w};
-  const numDomain = {1..n} dmapped Replicated();
+  const numDomain = {1..n} dmapped Block({1..n});
+  const replNumDomain = {1..n} dmapped Replicated();
   var crossNum = n * (n-1) / 2;
+  const tupleCrossDomain = {0..#crossNum} dmapped Block({0..#crossNum}); 
   const crossDomain = {0..#crossNum} dmapped Replicated();
   
   var images : [numDomain][imageDomain] RGB;
   var fftPlanNormal, fftPlanRotate : [numDomain] fftw_plan;
-  var fftPlanBack : [crossDomain] fftw_plan;
+  var fftPlanBack : [tupleCrossDomain] fftw_plan;
 
-  var t1Timer, t2Timer, t3Timer, t4Timer, t5Timer : real;
-  var sumt1Timer, sumt2Timer, sumt3Timer, sumt4Timer, sumt5Timer : real;
-
-  var prnuArray, prnuRotArray : [numDomain][imageDomain] complex;
+  var prnuArray, prnuRotArray : [replNumDomain][imageDomain] complex;
   var data : [numDomain] prnu_data;  
   var prnus : [numDomain][imageDomain] real;
-  var overallTimer, prnuTimer, fftTimer, corrTimer, crossTimer : Timer;
+  var overallTimer, prnuTimer, fftTimer, corrTimer, crossTimer, copyTimer : Timer;
 
-  var resultComplex : [crossDomain][imageDomain] complex;
-  var crossTuples : [crossDomain] 2*int;
+  var resultComplex : [tupleCrossDomain][imageDomain] complex;
+  var crossTuples : [0..#crossNum] 2*int;
   
   writeln("Running Common Source Identification...");
   writeln("  ", n, " images");
   writeln("  ", numLocales, " locale(s)");
   
+  forall (i,j) in corrDomain {
+    if (i > j) {
+      var idx = (((i-1) * (i - 1 -1)) / 2 ) + (j - 1);
+      crossTuples(idx) = (i,j);
+    }
+  }
   
   for i in numDomain {
     var image : [imageDomain] RGB;
     readJPG(image, imageFileNames[i]);
-    coforall loc in Locales do on loc {
-      images[i] = image;
-    }
+    images[i] = image; //Assumption that this would run on the locale image(i) belongs to.
   }
 
-  // writeln("After reading all the images on locale 0");
   /* Perform all the initializations */
   coforall loc in Locales do on loc {
-    for i in numDomain {
+    for i in numDomain.localSubdomain() {
       prnuInit(h,w,data(i));
-      // writeln(i, " on prnu location ", prnus(i).locale.id, " here.id is ", here.id," and i.locale id is ", i.locale.id);
     }
   }
-  // writeln("Post reading images and prnuInit");
 
   /* Start the timer to measure the ops */
   overallTimer.start();
   
   prnuTimer.start();
-  forall i in numDomain {
-    coforall loc in Locales do on loc {
-      // writeln("For i ", i, "  On locale ", here.id);
+  coforall loc in Locales do on loc {
+    forall i in numDomain.localSubdomain() {
       prnuExecute(prnus[i], images[i], data[i]);
-      // writeln("For i ", i, " on locale ", here.id, " post prnuExecute ");
       forall (k, j) in imageDomain {
         complexAndRotate(k, j, h, w, prnus[i], prnuArray[i], prnuRotArray[i]);
       }
     }
-    // calculatePrnu(h, w, images[i], prnus[i], prnuArray(i), prnuRotArray(i), data(i));
   }
   prnuTimer.stop();
-  // writeln("Post calculating all the PRNU");
-  
-  // startVdebug("vdata");
-  
+    
   //Create plans for the FFT for the prnu arrays : MUST BE SINGLE THREADED
   fftTimer.start();
-  for i in numDomain {
-    coforall loc in Locales do on loc {
-      // writeln("In FFT Plan For i: ", i, " locale.id" , here.id);
+  coforall loc in Locales do on loc {
+    for i in numDomain.localSubdomain() {
       fftPlanNormal(i) = planFFT(prnuArray(i), FFTW_FORWARD) ;
       fftPlanRotate(i) = planFFT(prnuRotArray(i), FFTW_FORWARD) ;  
     }
-  }
-
-  // writeln("After fft plans for prnu and rotation arrays");
-  sync {
-    coforall loc in Locales do on loc {
-      for i in numDomain {
-        // writeln("In FFT execute For i: ", i, " locale.id" , here.id);
+    sync {
+      forall i in numDomain.localSubdomain() {
         begin {execute(fftPlanNormal(i));}
         begin {execute(fftPlanRotate(i));}
       }
     }
   }
   fftTimer.stop();
-  // writeln("After all the fft plans have been executed");
-  // stopVdebug();
-
-  // writeln("PRNU Time: ", prnuTimer.elapsed(), "s");
-  // writeln("FFT Time: ", fftTimer.elapsed(), "s");
-
-  // Calculate the point wise product of both matrices
+  
+  
+  /*
+    1. Copy all the required prnu & prnuRot data to the local machines as required
+    2. Calculate the point wise product of both matrices
+  */
+  /* For reference: 
+    const tupleCrossDomain = {0..#crossNum} dmapped Block({0..#crossNum}); 
+    crossTuples(idx) = (i, j);
+  */
   crossTimer.start();
-  forall (i, j) in corrDomain {
+  coforall loc in Locales do on loc {
+    // To ensure that the prnu & prnuRot data is not copied multiple times
+    var flags, flagsRot : [numDomain] bool; 
 
-    var idx = (((i-1) * (i - 1 -1)) / 2 ) + (j - 1);
-    on Locales[idx % numLocales] do {
-    // coforall loc in Locales do on loc {
-      // Only calculating for values below the diagnol of the matrix. The upper half can simply be equated
-      // to the lower half
-      if(i > j) {
-        //call function here.
-        crossTuples(idx) = (i,j);        
-        resultComplex(idx) = prnuArray(i) * prnuRotArray(j);
-      } 
+    for idx in tupleCrossDomain.localSubdomain() {
+      var (i,j) = crossTuples(idx);
+      if(loc.id != images[i].locale.id && flags[i] == false) {
+        var tmp = images[i].locale;
+        prnuArray.replicand(loc)[i] = prnuArray.replicand(tmp)[i];
+        flags[i] = true;
+      }
+      if(loc.id != images[j].locale.id && flagsRot[j] == false) {
+        var tmp = images[j].locale;
+        prnuRotArray.replicand(loc)[j] = prnuRotArray.replicand(tmp)[j];
+        flagsRot[j] = true;
+      }
+      resultComplex(idx) = prnuArray[i] * prnuRotArray[j];
     }
   }
   crossTimer.stop();
   
-
   // Plan all the FFTs for the resultComplex in a serialized fashion
+  /* Calculate the enery in the resultComplex array */
   corrTimer.start();
-  for idx in crossDomain {
-    // coforall loc in Locales do on loc {
-    on Locales[idx % numLocales] do {
+  coforall loc in Locales do on loc {
+    for idx in tupleCrossDomain.localSubdomain() {
       fftPlanBack(idx) = planFFT(resultComplex(idx), FFTW_BACKWARD) ; 
     }
-  }
-
-  forall idx in crossDomain {
-    // coforall loc in Locales do on loc {
-    on Locales[idx % numLocales] do {
+    forall idx in tupleCrossDomain.localSubdomain() {
       execute(fftPlanBack(idx));
     }
-  }
-
-  // coforall loc in Locales do on loc {
-  forall (idx) in crossDomain {
-    on Locales[idx % numLocales] do {
+    forall idx in tupleCrossDomain.localSubdomain() {
       //Save the real part of result array, scale and square it.
       var result : [imageDomain] real;
       result = resultComplex(idx).re;
@@ -270,6 +272,7 @@ proc run() {
       corrMatrix(j,i) = corrMatrix(i,j);
     }
   }
+
   corrTimer.stop();
   
   overallTimer.stop();
