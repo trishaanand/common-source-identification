@@ -143,9 +143,9 @@ proc run() {
   var t1Timer, t2Timer, t3Timer, t4Timer, t5Timer : real;
   var sumt1Timer, sumt2Timer, sumt3Timer, sumt4Timer, sumt5Timer : real;
 
+  var prnuArray, prnuRotArray : [numDomain][imageDomain] complex;
   var data : [numDomain] prnu_data;  
   var prnus : [numDomain][imageDomain] real;
-  var prnuArray, prnuRotArray : [numDomain][imageDomain] complex;
   var overallTimer, prnuTimer, fftTimer, corrTimer, crossTimer : Timer;
 
   var resultComplex : [crossDomain][imageDomain] complex;

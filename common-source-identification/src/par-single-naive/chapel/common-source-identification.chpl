@@ -127,6 +127,7 @@ proc run() {
   /* Start the timer to measure the ops */
   overallTimer.start();
   
+  startVdebug("vdata");
   prnuTimer.start();
   forall i in numDomain {
     calculatePrnu(h, w, images[i], prnus[i], prnuArray(i), prnuRotArray(i), data(i));
@@ -173,7 +174,6 @@ proc run() {
     execute(fftPlanBack(idx));
   }
 
-
   forall (idx) in crossDomain {
     //Save the real part of result array, scale and square it.
     var result : [imageDomain] real;
@@ -186,7 +186,8 @@ proc run() {
     corrMatrix(j,i) = corrMatrix(i,j);
   }
   corrTimer.stop();
-  
+  stopVdebug();
+
   overallTimer.stop();
   for i in numDomain {
     prnuDestroy(data[i]);
