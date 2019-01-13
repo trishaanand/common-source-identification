@@ -148,31 +148,34 @@ proc run() {
 
   const imageDomain : domain(2) = {0..#h, 0..#w};
   const numDomain = {1..n} dmapped Block({1..n});
-  const replNumDomain = {1..n} dmapped Replicated();
+  // const replNumDomain = {1..n} dmapped Replicated();
   var crossNum = n * (n-1) / 2;
   const tupleCrossDomain = {0..#crossNum} dmapped Block({0..#crossNum}); 
-  const crossDomain = {0..#crossNum} dmapped Replicated();
+  // const crossDomain = {0..#crossNum} dmapped Replicated();
   
   var images : [numDomain][imageDomain] RGB;
   var fftPlanNormal, fftPlanRotate : [numDomain] fftw_plan;
   var fftPlanBack : [tupleCrossDomain] fftw_plan;
 
-  var prnuArray, prnuRotArray : [replNumDomain][imageDomain] complex;
+  var prnuArray, prnuRotArray : [numDomain][imageDomain] complex;
   var data : [numDomain] prnu_data;  
   var prnus : [numDomain][imageDomain] real;
   var overallTimer, prnuTimer, fftTimer, corrTimer, crossTimer, copyTimer : Timer;
 
   var resultComplex : [tupleCrossDomain][imageDomain] complex;
-  var crossTuples : [0..#crossNum] 2*int;
+  const replCrossDomain = {0..#crossNum} dmapped Replicated();
+  var crossTuples : [replCrossDomain] 2*int;
   
   writeln("Running Common Source Identification...");
   writeln("  ", n, " images");
   writeln("  ", numLocales, " locale(s)");
   
-  forall (i,j) in corrDomain {
-    if (i > j) {
-      var idx = (((i-1) * (i - 1 -1)) / 2 ) + (j - 1);
-      crossTuples(idx) = (i,j);
+  coforall loc in Locales do on loc {
+    forall (i,j) in corrDomain {
+      if (i > j) {
+        var idx = (((i-1) * (i - 1 -1)) / 2 ) + (j - 1);
+        crossTuples(idx) = (i,j);
+      }
     }
   }
   
@@ -193,6 +196,7 @@ proc run() {
   overallTimer.start();
   
   coforall loc in Locales do on loc {
+
     forall i in numDomain.localSubdomain() {
       prnuExecute(prnus[i], images[i], data[i]);
       forall (k, j) in imageDomain {
@@ -210,32 +214,75 @@ proc run() {
         begin {execute(fftPlanRotate(i));}
       }
     }
-  /*
-    1. Copy all the required prnu & prnuRot data to the local machines as required
-    2. Calculate the point wise product of both matrices
-  */
-  /* For reference: 
-    const tupleCrossDomain = {0..#crossNum} dmapped Block({0..#crossNum}); 
-    crossTuples(idx) = (i, j);
-  */
-  
+    /*
+      1. Copy all the required prnu & prnuRot data to the local machines as required
+      2. Calculate the point wise product of both matrices
+    */
+    /* For reference: 
+      const tupleCrossDomain = {0..#crossNum} dmapped Block({0..#crossNum}); 
+      crossTuples(idx) = (i, j);
+    */
+    //Create sparse subdomain to save prnu, and prnuRot arrays from other locales locally.
+    var subNumDomainPRNU : sparse subdomain(numDomain);
+    var subNumDomainROT : sparse subdomain(numDomain);
+    for idx in tupleCrossDomain.localSubdomain() {
+      var (i,j)= crossTuples(idx);
+      if(loc.id != images[i].locale.id) {
+        subNumDomainPRNU += i;
+      }
+      if(loc.id != images[j].locale.id) {
+        subNumDomainROT += j;
+      }
+    }
+
+    var prnuRemote : [subNumDomainPRNU][imageDomain] complex;
+    var prnuRotRemote : [subNumDomainROT][imageDomain] complex;
+
     // To ensure that the prnu & prnuRot data is not copied multiple times
     var flags, flagsRot : [numDomain] bool; 
 
-    for idx in tupleCrossDomain.localSubdomain() {
+// startVdebug("vdata");
+    forall idx in tupleCrossDomain.localSubdomain() {
+      var prnuTemp, prnuRotTemp : [imageDomain] complex;
+      var flagI, flagJ : bool; //To figure out if we should use sparse array, or prnu array for calc result
+                                // if true, use prnuArray, if false, use prnuRemote
       var (i,j) = crossTuples(idx);
-      if(loc.id != images[i].locale.id && flags[i] == false) {
-        var tmp = images[i].locale;
-        prnuArray.replicand(loc)[i] = prnuArray.replicand(tmp)[i];
-        flags[i] = true;
+      if(loc.id != images[i].locale.id) {
+        if (flags[i] == false) {
+          prnuRemote[i] = prnuArray[i]; //copy from locale which stores prnuArray[i] to store locally
+          flags[i] = true;
+        } 
+        flagI = false;
+        prnuTemp = prnuRemote[i];
+      } else {
+        flagI = true;
+        prnuTemp = prnuArray[i];
       }
-      if(loc.id != images[j].locale.id && flagsRot[j] == false) {
-        var tmp = images[j].locale;
-        prnuRotArray.replicand(loc)[j] = prnuRotArray.replicand(tmp)[j];
-        flagsRot[j] = true;
+      if(loc.id != images[j].locale.id) {
+        if (flagsRot[j] == false) {
+          prnuRotRemote[j] = prnuRotArray[j];
+          flagsRot[j] = true;
+        } 
+        flagJ = false;
+        prnuRotTemp = prnuRotRemote[j];
+      } else {
+        flagJ = true;
+        prnuRotTemp = prnuRotArray[j];
       }
-      resultComplex(idx) = prnuArray[i] * prnuRotArray[j];
+      
+      // if (flagI && flagJ) {//TT
+      //   resultComplex(idx) = prnuArray[i] * prnuRotArray[j];
+      // } else if (!flagI && !flagJ) {//FF
+      //   resultComplex(idx) = prnuRemote[i] * prnuRotRemote[j];
+      // } else if (flagI && !flagJ) {//TF
+      //   resultComplex(idx) = prnuArray[i] * prnuRotRemote[j];
+      // } else if (!flagI && flagJ) {//FT
+      //   resultComplex(idx) = prnuRemote[i] * prnuRotArray[j];
+      // }
+
+      resultComplex(idx) = prnuTemp * prnuRotTemp;
     }
+    // stopVdebug();
   // Plan all the FFTs for the resultComplex in a serialized fashion
     for idx in tupleCrossDomain.localSubdomain() {
       fftPlanBack(idx) = planFFT(resultComplex(idx), FFTW_BACKWARD) ; 
@@ -265,8 +312,8 @@ proc run() {
   
   writeln("The first value of the corrMatrix is: ", corrMatrix[2,1]);
   writeln("Time: ", overallTimer.elapsed(), "s");
-  writeln("PRNU Time: ", prnuTimer.elapsed(), "s");
-  writeln("Cross Time : ", crossTimer.elapsed(), "s");
+  // writeln("PRNU Time: ", prnuTimer.elapsed(), "s");
+  // writeln("Cross Time : ", crossTimer.elapsed(), "s");
   // writeln("Corr TIme : ", corrTimer.elapsed(), "s");
 
   var nrCorrelations = (n * (n - 1)) / 2;
