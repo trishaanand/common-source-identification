@@ -10,6 +10,8 @@ use FileSystem;
 /* Time the execution. */
 use Time;
 
+use BlockDist;
+
 /* Read in JPG images. */
 use read_jpg;
 
@@ -72,8 +74,44 @@ proc complexAndRotate(i : int, j : int, h : int, w : int,
 }
 
 proc main() {
+  // tryRun();
   run();
 }
+
+
+proc tryRun() {
+  /* Obtain the images. */
+  var imageFileNames = getImageFileNames(imagedir);
+
+  /* n represents the number of images that have to be correlated. */
+  var n = imageFileNames.size;
+
+  /* h, w will represent the height and width of an image or PRNU noise pattern 
+   * throughout the code.
+   */
+  var h, w : int;
+  (h, w) = getDimensionsJPG(imageFileNames.front());
+
+  const imageDomain : domain(2) = {0..#h, 0..#w};
+  const numDomain = {1..n} dmapped Block({1..n});
+  
+  var images : [numDomain][imageDomain] RGB;
+  
+  writeln("Running Common Source Identification...");
+  writeln("  ", n, " images");
+  writeln("  ", numLocales, " locale(s)");
+  
+  startVdebug("vdata");
+  for i in numDomain {
+    var image : [imageDomain] RGB;
+    readJPG(image, imageFileNames[i]);
+    images[i] = image;
+    // writeln("i : ", i, " on locale : ", here.id);
+  }
+  stopVdebug();
+  writeln("End of execution");
+}
+
 
 proc run() {
   /* Obtain the images. */
@@ -93,7 +131,7 @@ proc run() {
   var corrMatrix : [corrDomain] real;
 
   const imageDomain : domain(2) = {0..#h, 0..#w};
-  const numDomain : domain(1) = {1..n};
+  const numDomain = {1..n} dmapped Block({1..n});
   var crossNum = n * (n-1) / 2;
   const crossDomain : domain(1) = {0..#crossNum};
   
@@ -115,39 +153,73 @@ proc run() {
   writeln("Running Common Source Identification...");
   writeln("  ", n, " images");
   writeln("  ", numLocales, " locale(s)");
-  writeln("  ", here.numPUs(false, true), " cores");
-  writeln("  ", here.maxTaskPar, " maxTaskPar");
-
+  
+  for i in numDomain {
+    // readJPG(images[i], imageFileNames[i]);
+    // writeln("i : ", i, " on locale : ", here.id);
+    var image : [imageDomain] RGB;
+    readJPG(image, imageFileNames[i]);
+    images[i] = image;
+  }
+  
+  writeln("After reading all the images on locale 0");
   /* Perform all the initializations */
   for i in numDomain {
-    readJPG(images[i], imageFileNames[i]);
-    prnuInit(h,w,data(i));
+    on images(i) do {  
+      prnuInit(h,w,data(i));
+      // writeln(i, " on prnu location ", prnus(i).locale.id, " here.id is ", here.id," and i.locale id is ", i.locale.id);
+    }
   }
+  writeln("Post reading images and prnuInit");
 
   /* Start the timer to measure the ops */
   overallTimer.start();
   
   prnuTimer.start();
   forall i in numDomain {
-    calculatePrnu(h, w, images[i], prnus[i], prnuArray(i), prnuRotArray(i), data(i));
+    on images(i) do {
+      // writeln("For i ", i, " On locale ", here.id);
+      prnuExecute(prnus[i], images[i], data[i]);
+      // writeln("For i ", i, " on locale ", here.id, " post prnuExecute ");
+      forall (k, j) in imageDomain {
+        complexAndRotate(k, j, h, w, prnus[i], prnuArray[i], prnuRotArray[i]);
+      }
+    }
+      // calculatePrnu(h, w, images[i], prnus[i], prnuArray(i), prnuRotArray(i), data(i));
   }
   prnuTimer.stop();
-
+  writeln("Post calculating all the PRNU");
+  // return;
+  
+  // startVdebug("vdata");
+  
   //Create plans for the FFT for the prnu arrays : MUST BE SINGLE THREADED
   fftTimer.start();
   for i in numDomain {
-    fftPlanNormal(i) = planFFT(prnuArray(i), FFTW_FORWARD) ;
-    fftPlanRotate(i) = planFFT(prnuRotArray(i), FFTW_FORWARD) ;  
+    on prnuArray(i) do {
+      fftPlanNormal(i) = planFFT(prnuArray(i), FFTW_FORWARD) ;
+      fftPlanRotate(i) = planFFT(prnuRotArray(i), FFTW_FORWARD) ;  
+    }
   }
 
+  writeln("After fft plans for prnu and rotation arrays");
   sync {
     for i in numDomain {
-      begin {execute(fftPlanNormal(i));}
-      begin {execute(fftPlanRotate(i));}
+      on fftPlanNormal(i) do {
+        begin {execute(fftPlanNormal(i));}
+        begin {execute(fftPlanRotate(i));}
+      }
     }
   }
   fftTimer.stop();
+  writeln("After all the fft plans have been executed");
+  // stopVdebug();
 
+  writeln("PRNU Time: ", prnuTimer.elapsed(), "s");
+  writeln("FFT Time: ", fftTimer.elapsed(), "s");
+  
+
+  // return;
   // Calculate the point wise product of both matrices
   crossTimer.start();
   forall (i, j) in corrDomain {
@@ -157,7 +229,10 @@ proc run() {
       //call function here.
       var idx = (((i-1) * (i - 1 -1)) / 2 ) + (j - 1);
       crossTuples(idx) = (i,j);
-      resultComplex(idx) = prnuArray(i) * prnuRotArray(j);
+      on prnuArray(i) do {
+        resultComplex(idx) = prnuArray(i) * prnuRotArray(j);
+      }
+      
     }
   }
   crossTimer.stop();

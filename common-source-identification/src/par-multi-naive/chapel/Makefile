@@ -1,6 +1,6 @@
 # The source files for Chapel
 CHAPEL_SRC	= common-source-identification.chpl prnu.chpl \
-		  read_jpg.chpl
+		  read_jpg.chpl fft.chpl
 
 # The source files for C
 C_SRC		= ../c/read_jpg.c ../c/fastnoise.c ../c/grayscale.c \
@@ -42,3 +42,7 @@ cleanoutput:
 
 # Clean everyting
 cleanall: clean cleanslurm cleanoutput
+
+# Run the prnu
+run: 
+	GASNET_BACKTRACE=1 ./common-source-identification -nl 2 --writeOutput
