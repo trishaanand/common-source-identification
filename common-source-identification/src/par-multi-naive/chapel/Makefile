@@ -46,3 +46,7 @@ cleanall: clean cleanslurm cleanoutput
 # Run the prnu
 run: 
 	GASNET_BACKTRACE=1 ./common-source-identification -nl 2 --writeOutput
+
+# Run the prnu
+tun: 
+	GASNET_BACKTRACE=1 ./common-source-identification -nl 4 --writeOutput
