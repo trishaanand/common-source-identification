@@ -192,7 +192,6 @@ proc run() {
   /* Start the timer to measure the ops */
   overallTimer.start();
   
-  prnuTimer.start();
   coforall loc in Locales do on loc {
     forall i in numDomain.localSubdomain() {
       prnuExecute(prnus[i], images[i], data[i]);
@@ -200,12 +199,7 @@ proc run() {
         complexAndRotate(k, j, h, w, prnus[i], prnuArray[i], prnuRotArray[i]);
       }
     }
-  }
-  prnuTimer.stop();
-    
-  //Create plans for the FFT for the prnu arrays : MUST BE SINGLE THREADED
-  fftTimer.start();
-  coforall loc in Locales do on loc {
+    //Create plans for the FFT for the prnu arrays : MUST BE SINGLE THREADED
     for i in numDomain.localSubdomain() {
       fftPlanNormal(i) = planFFT(prnuArray(i), FFTW_FORWARD) ;
       fftPlanRotate(i) = planFFT(prnuRotArray(i), FFTW_FORWARD) ;  
@@ -216,10 +210,6 @@ proc run() {
         begin {execute(fftPlanRotate(i));}
       }
     }
-  }
-  fftTimer.stop();
-  
-  
   /*
     1. Copy all the required prnu & prnuRot data to the local machines as required
     2. Calculate the point wise product of both matrices
@@ -228,8 +218,7 @@ proc run() {
     const tupleCrossDomain = {0..#crossNum} dmapped Block({0..#crossNum}); 
     crossTuples(idx) = (i, j);
   */
-  crossTimer.start();
-  coforall loc in Locales do on loc {
+  
     // To ensure that the prnu & prnuRot data is not copied multiple times
     var flags, flagsRot : [numDomain] bool; 
 
@@ -247,19 +236,14 @@ proc run() {
       }
       resultComplex(idx) = prnuArray[i] * prnuRotArray[j];
     }
-  }
-  crossTimer.stop();
-  
   // Plan all the FFTs for the resultComplex in a serialized fashion
-  /* Calculate the enery in the resultComplex array */
-  corrTimer.start();
-  coforall loc in Locales do on loc {
     for idx in tupleCrossDomain.localSubdomain() {
       fftPlanBack(idx) = planFFT(resultComplex(idx), FFTW_BACKWARD) ; 
     }
     forall idx in tupleCrossDomain.localSubdomain() {
       execute(fftPlanBack(idx));
     }
+  /* Calculate the enery in the resultComplex array */
     forall idx in tupleCrossDomain.localSubdomain() {
       //Save the real part of result array, scale and square it.
       var result : [imageDomain] real;
@@ -272,8 +256,7 @@ proc run() {
       corrMatrix(j,i) = corrMatrix(i,j);
     }
   }
-
-  corrTimer.stop();
+    
   
   overallTimer.stop();
   for i in numDomain {
@@ -283,9 +266,8 @@ proc run() {
   writeln("The first value of the corrMatrix is: ", corrMatrix[2,1]);
   writeln("Time: ", overallTimer.elapsed(), "s");
   writeln("PRNU Time: ", prnuTimer.elapsed(), "s");
-  writeln("FFT Time: ", fftTimer.elapsed(), "s");
   writeln("Cross Time : ", crossTimer.elapsed(), "s");
-  writeln("Corr TIme : ", corrTimer.elapsed(), "s");
+  // writeln("Corr TIme : ", corrTimer.elapsed(), "s");
 
   var nrCorrelations = (n * (n - 1)) / 2;
   writeln("Throughput: ", nrCorrelations / overallTimer.elapsed(), " corrs/s");
