@@ -54,9 +54,11 @@ check_nr_images() {
 link_images() {
     local dataset=$1
     local nrimages=$2
-    /bin/rm -rf images
-    mkdir images
-    cd images
+    local imagedir=$3
+
+    /bin/rm -rf $imagedir
+    mkdir $imagedir
+    cd $imagedir
     local count=0
     for i in $BASE_DIR/${DIRS[$dataset]}/*
     do
@@ -70,13 +72,15 @@ link_images() {
 }
 
 main() {
-    if [ $# = 2 ]
+    if [ $# = 3 ]
     then
 	local dataset=$1
 	local nrimages=$2
+	local imagedir=$3
+
 	check_dataset $dataset
 	nrimages=$(check_nr_images $dataset $nrimages)
-	link_images $dataset $nrimages
+	link_images $dataset $nrimages $imagedir
     else
 	usage
 	exit 1

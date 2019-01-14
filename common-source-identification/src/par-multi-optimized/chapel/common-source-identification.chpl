@@ -13,6 +13,8 @@ use Time;
 use BlockDist;
 use ReplicatedDist;
 
+use Memory;
+
 /* Read in JPG images. */
 use read_jpg;
 
@@ -49,7 +51,13 @@ proc write2DRealArray(array : [] real, fileName :string) {
 
   for i in array.domain.dim(1) {
     for j in array.domain.dim(2) {
-      channel.writef("%{#####.#####} ", array[i, j]);
+      if (i > j) {
+        channel.writef("%{#####.#####} ", array[i, j]);
+      } else if (i < j) {
+        channel.writef("%{#####.#####} ", array[j, i]);
+      } else {
+        channel.writef("%{#####.#####} ", 0.0);
+      }
     }
     channel.writeln();
   }
@@ -101,26 +109,32 @@ proc tryRun() {
   writeln("Running Common Source Identification...");
   writeln("  ", n, " images");
   writeln("  ", numLocales, " locale(s)");
-  
-  forall (i,j) in corrDomain {
-    if (i > j) {
-      var idx = (((i-1) * (i - 1 -1)) / 2 ) + (j - 1);
-      crossTuples(idx) = (i-1,j-1);
-    }
-  }
+  // const totMem = + reduce Locales.physicalMemory();
+  // writeln("Total mem available across all locales : ", totMem);
+
+  // forall (i,j) in corrDomain {
+  //   if (i > j) {
+  //     var idx = (((i-1) * (i - 1 -1)) / 2 ) + (j - 1);
+  //     crossTuples(idx) = (i-1,j-1);
+  //   }
+  // }
 
   forall loc in Locales {
     on loc do {
-      var subNumDomainPRNU : sparse subdomain(numDomain);
-      var subNumDomainROT : sparse subdomain(numDomain);
-      var arr : [subNumDomainPRNU] real; 
-      for idx in crossDomain.localSubdomain() {
-        var (x,y)= crossTuples(idx);
-        subNumDomainPRNU += x;
-        subNumDomainROT += y;
-        writeln("subNumDomainPRNU IRV: ", arr.IRV);
-        writeln("On locale ", here.id, " tuple stored in the sparse domain is : ", crossTuples(idx));
-      }
+      const x = here.physicalMemory(unit=MemUnits.GB, retType=real);
+      writeln("On locale: ", loc.id, " memory: ", x);
+      // writeln("On locale: ", loc.id, " memory: ", locale.physicalMemory(MemUnits.MB, x));
+
+      // var subNumDomainPRNU : sparse subdomain(numDomain);
+      // var subNumDomainROT : sparse subdomain(numDomain);
+      // var arr : [subNumDomainPRNU] real; 
+      // for idx in crossDomain.localSubdomain() {
+      //   var (x,y)= crossTuples(idx);
+      //   subNumDomainPRNU += x;
+      //   subNumDomainROT += y;
+      //   writeln("subNumDomainPRNU IRV: ", arr.IRV);
+      //   writeln("On locale ", here.id, " tuple stored in the sparse domain is : ", crossTuples(idx));
+      // }
     }
   }
 
@@ -128,8 +142,25 @@ proc tryRun() {
   writeln("End of execution");
 }
 
+proc printGlobalMemory(s : string) {
+  coforall loc in Locales do on loc {
+    writeln(s , " on locale: ", here.id, " mem: ", memoryUsed()/1000000);
+  }
+}
+
+proc printLocalMemory(s : string) {
+  writeln(s , " on locale: ", here.id, " mem: ", memoryUsed()/1000000);
+}
+
+/**
+  TODO: Potential improvements in the codebase:
+  1. Figure out why removing the prnuTemp array & using flags doesn't work on the local machines. 
+  2. CorrMatrix should also be block mapped. The println for the CorrMatrix is outside the timer loop.
+  */
 
 proc run() {
+  printGlobalMemory("Before doing anything");
+  
   /* Obtain the images. */
   var imageFileNames = getImageFileNames(imagedir);
 
@@ -142,76 +173,98 @@ proc run() {
   var h, w : int;
   (h, w) = getDimensionsJPG(imageFileNames.front());
 
+
+
+
   /* Create a domain for the correlation matrix. */
   const corrDomain : domain(2) = {1..n, 1..n};
   var corrMatrix : [corrDomain] real;
 
   const imageDomain : domain(2) = {0..#h, 0..#w};
   const numDomain = {1..n} dmapped Block({1..n});
-  // const replNumDomain = {1..n} dmapped Replicated();
   var crossNum = n * (n-1) / 2;
   const tupleCrossDomain = {0..#crossNum} dmapped Block({0..#crossNum}); 
-  // const crossDomain = {0..#crossNum} dmapped Replicated();
-  
-  var images : [numDomain][imageDomain] RGB;
-  var fftPlanNormal, fftPlanRotate : [numDomain] fftw_plan;
-  var fftPlanBack : [tupleCrossDomain] fftw_plan;
 
+  // Define all the classes here
+  class Im {
+    var images : [numDomain][imageDomain] RGB;
+    var data : [numDomain] prnu_data;  
+  }
+  
+  printGlobalMemory("Before PRNU");
+  
   var prnuArray, prnuRotArray : [numDomain][imageDomain] complex;
-  var data : [numDomain] prnu_data;  
-  var prnus : [numDomain][imageDomain] real;
+  printGlobalMemory("After PRNU");
   var overallTimer, prnuTimer, fftTimer, corrTimer, crossTimer, copyTimer : Timer;
 
-  var resultComplex : [tupleCrossDomain][imageDomain] complex;
+  
   const replCrossDomain = {0..#crossNum} dmapped Replicated();
   var crossTuples : [replCrossDomain] 2*int;
   
+
+  //Create domain whose pure purpose is deallocate or allocate an empty array 
+
   writeln("Running Common Source Identification...");
   writeln("  ", n, " images");
   writeln("  ", numLocales, " locale(s)");
   
-  coforall loc in Locales do on loc {
+  for loc in Locales do on loc {
+    writeln("On loc ", here.id, " size of the numDomain.subdomain is ", numDomain.localSubdomain().size);
+    writeln("On loc ", here.id, " size of the crossDomain.subdomain is ", tupleCrossDomain.localSubdomain().size);
     forall (i,j) in corrDomain {
       if (i > j) {
         var idx = (((i-1) * (i - 1 -1)) / 2 ) + (j - 1);
         crossTuples(idx) = (i,j);
       }
     }
+    printLocalMemory("Before reading images");
   }
   
+  var imObj = new unmanaged Im ();
+
   for i in numDomain {
     var image : [imageDomain] RGB;
     readJPG(image, imageFileNames[i]);
-    images[i] = image; //Assumption that this would run on the locale image(i) belongs to.
+    imObj.images[i] = image; //Assumption that this would run on the locale image(i) belongs to.
   }
 
   /* Perform all the initializations */
   coforall loc in Locales do on loc {
     for i in numDomain.localSubdomain() {
-      prnuInit(h,w,data(i));
+      prnuInit(h,w,imObj.data(i));
     }
+    printLocalMemory("After creating class storing image and data");
   }
 
   /* Start the timer to measure the ops */
   overallTimer.start();
   
   coforall loc in Locales do on loc {
-
-    forall i in numDomain.localSubdomain() {
-      prnuExecute(prnus[i], images[i], data[i]);
-      forall (k, j) in imageDomain {
-        complexAndRotate(k, j, h, w, prnus[i], prnuArray[i], prnuRotArray[i]);
+    {
+      var prnus : [numDomain.localSubdomain()][imageDomain] real;
+      forall i in numDomain.localSubdomain() {
+        prnuExecute(prnus[i], imObj.images[i], imObj.data[i]);
+        forall (k, j) in imageDomain {
+          complexAndRotate(k, j, h, w, prnus[i], prnuArray[i], prnuRotArray[i]);
+        }
       }
     }
+  }
+  delete imObj;
+  printGlobalMemory("After deleting class obj");
+  coforall loc in Locales do on loc {
     //Create plans for the FFT for the prnu arrays : MUST BE SINGLE THREADED
-    for i in numDomain.localSubdomain() {
-      fftPlanNormal(i) = planFFT(prnuArray(i), FFTW_FORWARD) ;
-      fftPlanRotate(i) = planFFT(prnuRotArray(i), FFTW_FORWARD) ;  
-    }
-    sync {
-      forall i in numDomain.localSubdomain() {
-        begin {execute(fftPlanNormal(i));}
-        begin {execute(fftPlanRotate(i));}
+    { //Run this only once.
+      var fftPlanNormal, fftPlanRotate : [numDomain.localSubdomain()] fftw_plan;
+      for i in numDomain.localSubdomain() {
+        fftPlanNormal(i) = planFFT(prnuArray(i), FFTW_FORWARD) ;
+        fftPlanRotate(i) = planFFT(prnuRotArray(i), FFTW_FORWARD) ;  
+      }
+      sync {
+        forall i in numDomain.localSubdomain() {
+          begin {execute(fftPlanNormal(i));}
+          begin {execute(fftPlanRotate(i));}
+        }
       }
     }
     /*
@@ -227,88 +280,103 @@ proc run() {
     var subNumDomainROT : sparse subdomain(numDomain);
     for idx in tupleCrossDomain.localSubdomain() {
       var (i,j)= crossTuples(idx);
-      if(loc.id != images[i].locale.id) {
+      if(loc.id != prnuArray[i].locale.id) {
         subNumDomainPRNU += i;
       }
-      if(loc.id != images[j].locale.id) {
+      if(loc.id != prnuRotArray[j].locale.id) {
         subNumDomainROT += j;
       }
     }
+    printLocalMemory("Before alloc resultComplex");
+    var resultComplex : [tupleCrossDomain.localSubdomain()][imageDomain] complex;
+    {
+      var prnuRemote : [subNumDomainPRNU][imageDomain] complex;
+      printLocalMemory("After prnuRemote");
+      var prnuRotRemote : [subNumDomainROT][imageDomain] complex;
+      printLocalMemory("After prnuRotRemote");
+      // // To ensure that the prnu & prnuRot data is not copied multiple times
+      var flags, flagsRot : [numDomain] bool; 
+      forall idx in tupleCrossDomain.localSubdomain() {
+        var prnuTemp, prnuRotTemp : [imageDomain] complex;
+        var flagI, flagJ : bool; //To figure out if we should use sparse array, or prnu array for calc result
+      //                             // if true, use prnuArray, if false, use prnuRemote
+        var (i,j) = crossTuples(idx);
+        if(loc.id != prnuArray[i].locale.id) {
+          if (flags[i] == false) {
+            prnuRemote[i] = prnuArray[i]; //copy from locale which stores prnuArray[i] to store locally
+            flags[i] = true;
+          } 
+          flagI = false;
+          prnuTemp = prnuRemote[i];
+        } else {
+          flagI = true;
+          prnuTemp = prnuArray[i];
+        }
+        if(loc.id != prnuRotArray[j].locale.id) {
+          if (flagsRot[j] == false) {
+            prnuRotRemote[j] = prnuRotArray[j];
+            flagsRot[j] = true;
+          } 
+          flagJ = false;
+          prnuRotTemp = prnuRotRemote[j];
+        } else {
+          flagJ = true;
+          prnuRotTemp = prnuRotArray[j];
+        }
+        
+        // if (flagI && flagJ) {//TT
+        //   resultComplex(idx) = prnuArray[i] * prnuRotArray[j];
+        // } else if (!flagI && !flagJ) {//FF
+        //   resultComplex(idx) = prnuRemote[i] * prnuRotRemote[j];
+        // } else if (flagI && !flagJ) {//TF
+        //   resultComplex(idx) = prnuArray[i] * prnuRotRemote[j];
+        // } else if (!flagI && flagJ) {//FT
+        //   resultComplex(idx) = prnuRemote[i] * prnuRotArray[j];
+        // }
 
-    var prnuRemote : [subNumDomainPRNU][imageDomain] complex;
-    var prnuRotRemote : [subNumDomainROT][imageDomain] complex;
-
-    // To ensure that the prnu & prnuRot data is not copied multiple times
-    var flags, flagsRot : [numDomain] bool; 
-
-// startVdebug("vdata");
-    forall idx in tupleCrossDomain.localSubdomain() {
-      var prnuTemp, prnuRotTemp : [imageDomain] complex;
-      var flagI, flagJ : bool; //To figure out if we should use sparse array, or prnu array for calc result
-                                // if true, use prnuArray, if false, use prnuRemote
-      var (i,j) = crossTuples(idx);
-      if(loc.id != images[i].locale.id) {
-        if (flags[i] == false) {
-          prnuRemote[i] = prnuArray[i]; //copy from locale which stores prnuArray[i] to store locally
-          flags[i] = true;
-        } 
-        flagI = false;
-        prnuTemp = prnuRemote[i];
-      } else {
-        flagI = true;
-        prnuTemp = prnuArray[i];
+        resultComplex(idx) = prnuTemp * prnuRotTemp;
+        // resultComplex(idx) = prnuArray[i] * prnuRotArray[j];
       }
-      if(loc.id != images[j].locale.id) {
-        if (flagsRot[j] == false) {
-          prnuRotRemote[j] = prnuRotArray[j];
-          flagsRot[j] = true;
-        } 
-        flagJ = false;
-        prnuRotTemp = prnuRotRemote[j];
-      } else {
-        flagJ = true;
-        prnuRotTemp = prnuRotArray[j];
+    }
+    
+    printLocalMemory("After rotRemote & remote are deleted");
+    {
+      var fftPlanBack : [tupleCrossDomain.localSubdomain()] fftw_plan;
+      // Plan all the FFTs for the resultComplex in a serialized fashion
+      for idx in tupleCrossDomain.localSubdomain() {
+        fftPlanBack(idx) = planFFT(resultComplex(idx), FFTW_BACKWARD) ; 
       }
-      
-      // if (flagI && flagJ) {//TT
-      //   resultComplex(idx) = prnuArray[i] * prnuRotArray[j];
-      // } else if (!flagI && !flagJ) {//FF
-      //   resultComplex(idx) = prnuRemote[i] * prnuRotRemote[j];
-      // } else if (flagI && !flagJ) {//TF
-      //   resultComplex(idx) = prnuArray[i] * prnuRotRemote[j];
-      // } else if (!flagI && flagJ) {//FT
-      //   resultComplex(idx) = prnuRemote[i] * prnuRotArray[j];
-      // }
-
-      resultComplex(idx) = prnuTemp * prnuRotTemp;
+      forall idx in tupleCrossDomain.localSubdomain() {
+        execute(fftPlanBack(idx));
+      }
     }
-    // stopVdebug();
-  // Plan all the FFTs for the resultComplex in a serialized fashion
-    for idx in tupleCrossDomain.localSubdomain() {
-      fftPlanBack(idx) = planFFT(resultComplex(idx), FFTW_BACKWARD) ; 
-    }
-    forall idx in tupleCrossDomain.localSubdomain() {
-      execute(fftPlanBack(idx));
-    }
-  /* Calculate the enery in the resultComplex array */
+    
+    /* Calculate the enery in the resultComplex array */
     forall idx in tupleCrossDomain.localSubdomain() {
       //Save the real part of result array, scale and square it.
-      var result : [imageDomain] real;
-      result = resultComplex(idx).re;
-      result = (result * result) / ((h*w) * (h*w)); 
+      // var result : [imageDomain] real;
+      resultComplex(idx).re = (resultComplex(idx).re * resultComplex(idx).re) / ((h*w) * (h*w)); 
     
       //call function here.
       var (i,j) = crossTuples(idx);
       corrMatrix(i,j) = computeEverything(h, w, result);
-      corrMatrix(j,i) = corrMatrix(i,j);
+      // corrMatrix(j,i) = corrMatrix(i,j);
     }
   }
-    
+  
+  // forall (i,j) in corrDomain {
+  //   if(i < j) {
+  //     corrMatrix(j,i) = corrMatrix(i,j);
+  //   }
+  // }
   
   overallTimer.stop();
-  for i in numDomain {
-    prnuDestroy(data[i]);
-  }
+  printGlobalMemory("After everything is done");
+  // coforall loc in Locales do on loc {
+  //   for i in numDomain.localSubdomain() {
+  //     prnuDestroy(data[i]);
+  //   }
+  // }
   
   writeln("The first value of the corrMatrix is: ", corrMatrix[2,1]);
   writeln("Time: ", overallTimer.elapsed(), "s");
@@ -323,6 +391,8 @@ proc run() {
     writeln("Writing output files...");
     write2DRealArray(corrMatrix, "corrMatrix");
   }
+  writeln(prnuArray[1](0,0));
+  writeln(prnuRotArray[1](h-1,w-1));
 
   writeln("End");
 }
