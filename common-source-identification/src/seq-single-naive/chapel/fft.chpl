@@ -72,5 +72,5 @@ proc computeEverything(h : int, w : int, prnuComplex : [] complex, prnuRotComple
     // energy = sum/((h*w) - ((highI-lowI + 1)*(highJ-lowJ + 1)));
     energy = sum/((h*w) - 121);
     var PCE = max / energy;
-    return (PCE, t1Timer.elapsed(), t2Timer.elapsed(), t3Timer.elapsed(), t4Timer.elapsed(), t5Timer.elapsed());
+    return PCE;
 }

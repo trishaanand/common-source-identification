@@ -24,11 +24,18 @@ proc write2DRealArray(array : [] real, fileName :string) {
 
   for i in array.domain.dim(1) {
     for j in array.domain.dim(2) {
-      channel.writef("%{#####.#####} ", array[i, j]);
+      if (i > j) {
+        channel.writef("%{#####.#####} ", array[i, j]);
+      } else if (i < j) {
+        channel.writef("%{#####.#####} ", array[j, i]);
+      } else {
+        channel.writef("%{#####.#####} ", 0.0);
+      }
     }
     channel.writeln();
   }
 }
+
 
 proc flushWriteln(s...?) {
   stdout.writeln(s);
