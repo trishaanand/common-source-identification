@@ -1,9 +1,6 @@
 /* Use assertions. */
 use Assert;
 
-/* Use sorting. */
-use Sort;
-
 /* Allow us to read the contents of a directory. */
 use FileSystem;
 
@@ -18,53 +15,12 @@ use prnu;
 
 /* user defined functions */
 use fft;
+use utils;
 
 /* Configuration parameters */
 config const imagedir : string = "images";
 config const writeOutput : bool = false;
 var data : prnu_data;  
-
-/* Add a directory to a file name. */
-proc addDirectory(fileName : string, dir : string) : string {
-  return dir + "/" + fileName;
-}
-
-/* Get an array of the file names of the images in directory dir. */
-proc getImageFileNamesFullPath(dir : string) {
-    var imageFiles = listdir(dir);
-    sort(imageFiles);
-    return addDirectory(imageFiles, dir);
-}
-
-proc getRotatedFilename(fileName: string) {
-  return "rot-" + fileName;
-}
-
-/* Get an array of the file names of the images in directory dir. */
-proc getImageFileNames(dir : string) {
-    var imageFiles = listdir(dir);
-    sort(imageFiles);
-    return imageFiles;
-}
-
-/* Write a real array to a file. */
-proc write2DRealArray(array : [] real, fileName :string) {
-  assert(array.rank == 2);
-  var file = open(fileName, iomode.cw);
-  var channel = file.writer();
-
-  for i in array.domain.dim(1) {
-    for j in array.domain.dim(2) {
-      channel.writef("%{#####.#####} ", array[i, j]);
-    }
-    channel.writeln();
-  }
-}
-
-proc flushWriteln(s...?) {
-  stdout.writeln(s);
-  stdout.flush();
-}
 
 /* Given a file name this function calculates & returns the prnu data for that image */
 proc calculatePrnuComplex(h : int, w : int, image : [] RGB) {
@@ -97,7 +53,7 @@ proc rotated180Prnu(h : int, w : int, prnu : [] complex) {
 
 proc main() {
   /* Obtain the images. */
-  var imageFileNames = getImageFileNamesFullPath(imagedir);
+  var imageFileNames = getImageFileNames(imagedir);
 
   /* n represents the number of images that have to be correlated. */
   var n = imageFileNames.size;
