@@ -138,7 +138,6 @@ proc main() {
   for i in numDomain {
     prnuArray(i) = calculatePrnuComplex(h, w, images[i]);
     prnuRotArray(i) = rotated180Prnu(h, w, prnuArray(i));
-
     calculateFFT(prnuArray(i), FFTW_FORWARD);
     calculateFFT(prnuRotArray(i), FFTW_FORWARD);
   }
@@ -151,7 +150,7 @@ proc main() {
   for (i, j) in corrDomain {
     // Only calculating for values below the diagnol of the matrix. The upper half can simply be equated
     // to the lower half
-    if(i > j) {
+    if(i < j) {
       //call function here.
       (corrMatrix(i,j), t1Timer, t2Timer, t3Timer, t4Timer, t5Timer) = computeEverything(h, w, prnuArray(i), prnuRotArray(j));
       corrMatrix(j,i) = corrMatrix(i,j);
