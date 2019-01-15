@@ -61,20 +61,21 @@ proc write2DRealArray(array : [] real, fileName :string) {
   }
 }
 
+proc flushWriteln(s...?) {
+  stdout.writeln(s);
+  stdout.flush();
+}
+
 /* Given a file name this function calculates & returns the prnu data for that image */
 proc calculatePrnuComplex(h : int, w : int, image : [] RGB) {
   
   /* Create a domain for an image and allocate the image itself */
   const imageDomain: domain(2) = {0..#h, 0..#w};
 
-  /* allocate a prnu_data record */
-  
   var prnu : [imageDomain] real;
   var prnuComplex : [imageDomain] complex; 
   
-  // prnuInit(h, w, data);
   prnuExecute(prnu, image, data);
-  // prnuDestroy(data);
 
   for(i,j) in imageDomain {
     prnuComplex(i,j) = prnu(i,j) + 0i;
@@ -113,24 +114,27 @@ proc main() {
   var t1Timer, t2Timer, t3Timer, t4Timer, t5Timer : real;
   var sumt1Timer, sumt2Timer, sumt3Timer, sumt4Timer, sumt5Timer : real;
 
-
   const imageDomain : domain(2) = {0..#h, 0..#w};
   const numDomain : domain(1) = {1..n};
+
+  flushWriteln("Running Common Source Identification...");
+  flushWriteln("  ", n, " images");
+  flushWriteln("  ", numLocales, " locale(s)");
+
+  /* ************************* Start here ********************* */
   var images : [numDomain][imageDomain] RGB;
 
   var prnuArray, prnuRotArray : [numDomain][imageDomain] complex;
   
   var overallTimer, fftTimer, corrTimer : Timer;
 
-  writeln("Running Common Source Identification...");
-  writeln("  ", n, " images");
-  writeln("  ", numLocales, " locale(s)");
-
   /* Perform all initializations here */
   prnuInit(h, w, data);
   for i in numDomain {
     readJPG(images[i], imageFileNames[i]);
   }
+
+  flushWriteln("Read all images");
 
   overallTimer.start();
   fftTimer.start();
@@ -142,7 +146,6 @@ proc main() {
     calculateFFT(prnuRotArray(i), FFTW_FORWARD);
   }
   fftTimer.stop();
-
 
   /* Calculate correlation now */
   corrTimer.start();
@@ -166,23 +169,23 @@ proc main() {
   overallTimer.stop();
   prnuDestroy(data);
 
-  writeln("The first value of the corrMatrix is: ", corrMatrix[2,1]);
-  writeln("Time: ", overallTimer.elapsed(), "s");
-  writeln("PRNU + FFT Time: ", fftTimer.elapsed(), "s");
-  writeln("Corr TIme : ", corrTimer.elapsed(), "s");
-  writeln("T1 Timer: ", sumt1Timer, "s");
-  writeln("T2 Timer: ", sumt2Timer, "s");
-  writeln("T3 Timer: ", sumt3Timer, "s");
-  writeln("T4 Timer: ", sumt4Timer, "s");
-  writeln("T5 Timer: ", sumt5Timer, "s");
+  flushWriteln("The first value of the corrMatrix is: ", corrMatrix[2,1]);
+  flushWriteln("Time: ", overallTimer.elapsed(), "s");
+  flushWriteln("PRNU + FFT Time: ", fftTimer.elapsed(), "s");
+  flushWriteln("Corr TIme : ", corrTimer.elapsed(), "s");
+  flushWriteln("T1 Timer: ", sumt1Timer, "s");
+  flushWriteln("T2 Timer: ", sumt2Timer, "s");
+  flushWriteln("T3 Timer: ", sumt3Timer, "s");
+  flushWriteln("T4 Timer: ", sumt4Timer, "s");
+  flushWriteln("T5 Timer: ", sumt5Timer, "s");
 
   var nrCorrelations = (n * (n - 1)) / 2;
-  writeln("Throughput: ", nrCorrelations / overallTimer.elapsed(), " corrs/s");
+  flushWriteln("Throughput: ", nrCorrelations / overallTimer.elapsed(), " corrs/s");
 
   if (writeOutput) {
-    writeln("Writing output files...");
+    flushWriteln("Writing output files...");
     write2DRealArray(corrMatrix, "corrMatrix");
   }
 
-  writeln("End");
+  flushWriteln("End");
 }
