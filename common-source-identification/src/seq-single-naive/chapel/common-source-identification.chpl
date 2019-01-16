@@ -99,6 +99,7 @@ proc main() {
   var idx : int = 0;
 
   while(idx < nrCorrelations) {
+    overallTimer.start();
     var localRange : int;
     if (idx + num) >= nrCorrelations {
       localRange = nrCorrelations-1;
@@ -119,6 +120,7 @@ proc main() {
     var images : [imgSparseDom][imageDomain] RGB;
     var prnuArray : [prnuSparseDom][imageDomain] complex;
     var prnuRotArray : [prnuRotSparseDom][imageDomain] complex;
+    overallTimer.stop();
 
     for i in imgSparseDom {
       readJPG(images[i], imageFileNames[i]);
