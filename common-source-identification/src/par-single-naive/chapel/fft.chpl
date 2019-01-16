@@ -12,12 +12,6 @@ class PlusReduceOp: ReduceScanOp {
   proc clone()          return new unmanaged PlusReduceOp(eltType=eltType);
 }
 
-/* prnu is passed by reference. Hence not returning any value from the FFT calculation */ 
-proc calculateFFT(prnu : [] complex, sign : c_int) {
-    var fftPlan = plan_dft(prnu, prnu, sign, FFTW_ESTIMATE);
-    execute(fftPlan);
-}
-
 proc planFFT(prnu : [] complex, sign : c_int) {
     return plan_dft(prnu, prnu, sign, FFTW_ESTIMATE);
 }
@@ -37,7 +31,7 @@ proc getMax(result : [] real, h : int, w : int) {
     return (max, lowI, highI, lowJ, highJ);
 }
 
-proc computeEverything(h : int, w : int, result : [] real) {
+proc computeEverything(h : int, w : int, ref result : [] real) {
     const imageDomain: domain(2) = {0..#h, 0..#w};
 
     var (max, lowI, highI, lowJ, highJ) = getMax(result, h, w);
@@ -48,10 +42,6 @@ proc computeEverything(h : int, w : int, result : [] real) {
     
     sum = sum - ignoreSum;
 
-    //Calculate average energy
-    var energy : real;
-    // energy = sum/((h*w) - ((highI-lowI + 1)*(highJ-lowJ + 1)));
-    energy = sum/((h*w) - 121);
-    var PCE = (max) / energy;
+    var PCE = max * ((h*w) - 121) / sum;
     return PCE;
 }

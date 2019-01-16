@@ -27,13 +27,13 @@ proc calculatePrnuComplex(h : int, w : int, image : [] RGB, ref data : prnu_data
   
   /* Create a domain for an image and allocate the image itself */
   const imageDomain: domain(2) = {0..#h, 0..#w};
-
+  
   var prnu : [imageDomain] real;
   var prnuComplex : [imageDomain] complex; 
   
   prnuExecute(prnu, image, data);
 
-  for(i,j) in imageDomain {
+  forall (i,j) in imageDomain {
     prnuComplex(i,j) = prnu(i,j) + 0i;
   }
 
@@ -45,7 +45,7 @@ proc rotated180Prnu(h : int, w : int, prnu : [] complex) {
   var prnuRot : [imageDomain] complex;
 
   /* Rotate the matrix 180 degrees */
-  for (i,j) in imageDomain do 
+  forall (i,j) in imageDomain do 
     prnuRot(i,j) = prnu(h-i-1, w-j-1);
 
   return prnuRot;
@@ -89,9 +89,6 @@ proc main() {
     }
   }
 
-  /* Perform all initializations here */
-  prnuInit(h, w, data);
-  
   var idx : int = 0;
 
   while(idx < nrCorrelations) {
@@ -138,22 +135,17 @@ proc main() {
       var prnu = calculatePrnuComplex(h, w, images[i], data(i));
       if prnuSparseDom.member(i) {
         prnuArray(i) = prnu;
-        // calculateFFT(prnuArray(i), FFTW_FORWARD);
       }
       if prnuRotSparseDom.member(i) {
         prnuRotArray(i) = rotated180Prnu(h, w, prnu);
-        // calculateFFT(prnuRotArray(i), FFTW_FORWARD);
       }
     }
 
-    for it in localSubDom {
-      var (i,j) = crossTuples(it);
-      if prnuSparseDom.member(i) {
-        fftPlan(i) = planFFT(prnuArray(i), FFTW_FORWARD);  
-      }
-      if prnuRotSparseDom.member(j) {
-        fftRotPlan(j) = planFFT(prnuRotArray(j), FFTW_FORWARD);
-      }
+    for i in prnuSparseDom {
+      fftPlan(i) = planFFT(prnuArray(i), FFTW_FORWARD);  
+    }
+    for j in prnuRotSparseDom {
+      fftRotPlan(j) = planFFT(prnuRotArray(j), FFTW_FORWARD);
     }
 
     sync {
@@ -161,6 +153,8 @@ proc main() {
         forall i in prnuSparseDom {
           execute(fftPlan(i));
         }
+      }
+      begin {
         forall i in prnuRotSparseDom {
           execute(fftRotPlan(i));
         }
@@ -176,11 +170,11 @@ proc main() {
 
     var fftPlanBack : [localSubDom] fftw_plan;
 
-    // Calculate the inverse fft
+    // Plan the inverse fft
     for it in localSubDom {
       fftPlanBack(it) = planFFT(resultComplex(it), FFTW_BACKWARD) ; 
     }
-    
+
     forall it in localSubDom {
       execute(fftPlanBack(it));
     }
@@ -188,6 +182,7 @@ proc main() {
     /* Calculate correlation now */
     forall it in localSubDom {
       var (i,j) = crossTuples(it);
+      
       var result : [imageDomain] real = (resultComplex(it).re * resultComplex(it).re) / ((h*w) * (h*w));
       corrMatrix(i,j) = computeEverything(h, w, result);
     }
