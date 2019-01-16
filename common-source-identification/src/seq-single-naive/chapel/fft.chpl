@@ -13,32 +13,19 @@ proc computeEverything(h : int, w : int, prnuComplex : [] complex, prnuRotComple
     var resultComplex : [imageDomain] complex;
     var result : [imageDomain] real;
 
-    var t1Timer, t2Timer, t3Timer, t4Timer, t5Timer  : Timer;
-
-    t1Timer.start();
     // Calculate the point wise product of both matrices
     for (i,j) in imageDomain do {
         resultComplex(i,j) = prnuComplex(i,j) * prnuRotComplex(i,j);
     }
-    t1Timer.stop();
 
-    t2Timer.start();
     // Calculate inverse FFT of the result
     calculateFFT(resultComplex, FFTW_BACKWARD);
-    t2Timer.stop();
-    resultComplex /= (h*w);
 
     // Scale the result
-    t3Timer.start();
     for(i,j) in imageDomain {
-        result(i,j) = resultComplex(i,j).re;
-        result(i,j) = ( result(i,j) * result(i,j) );
-        // result(i,j) = ( result(i,j) * result(i,j) )/ ((h*w) * (h*w));
+        result(i,j) = ( resultComplex(i,j).re * resultComplex(i,j).re )/ ((h*w) * (h*w));
     }
-    t3Timer.stop();
     
-    
-    t4Timer.start();
     var max, sum : real;
     sum = 0.0;
     var maxI, maxJ : int;
@@ -50,7 +37,6 @@ proc computeEverything(h : int, w : int, prnuComplex : [] complex, prnuRotComple
             maxJ = j;
         }
     }
-    t4Timer.stop();
     
     //In the result matrix, remove 11x11 elements around the max from the total sum
     var lowI, highI, lowJ, highJ : int;
@@ -59,17 +45,14 @@ proc computeEverything(h : int, w : int, prnuComplex : [] complex, prnuRotComple
     lowJ = if ((maxJ-5) < 0) then 0 else maxJ -5;
     highJ = if ((maxJ + 5) > w) then w else maxJ + 5;
 
-    t5Timer.start();
     for (i,j) in imageDomain do {
         if(!(i > lowI && i < highI && j > lowJ && j < highJ )) {
             sum += result(i,j);
         }
     }
-    t5Timer.stop();
 
     //Calculate average energy
     var energy : real;
-    // energy = sum/((h*w) - ((highI-lowI + 1)*(highJ-lowJ + 1)));
     energy = sum/((h*w) - 121);
     var PCE = max / energy;
     return PCE;
