@@ -4,6 +4,8 @@ use Sort;
 /* Allow us to read the contents of a directory. */
 use FileSystem;
 
+use Memory;
+
 /* Add a directory to a file name. */
 proc addDirectory(fileName : string, dir : string) : string {
   return dir + "/" + fileName;
@@ -41,3 +43,14 @@ proc flushWriteln(s...?) {
   stdout.writeln(s);
   stdout.flush();
 }
+
+proc printGlobalMemory(s : string) {
+  coforall loc in Locales do on loc {
+    flushWriteln("On locale: ", here.id, ", ", s, " mem: ", memoryUsed()/1000000);
+  }
+}
+
+proc printLocalMemory(s : string) {
+  flushWriteln("On locale: ", here.id, ", ", s, " mem: ", memoryUsed()/1000000);
+}
+

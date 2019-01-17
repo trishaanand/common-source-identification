@@ -17,38 +17,33 @@ use prnu;
 use fft;
 use utils;
 
+
 /* Configuration parameters */
 config const imagedir : string = "images";
 config const writeOutput : bool = false;
-config const num : int = 100; 
+config const num : int = 50; 
 
 /* Given a file name this function calculates & returns the prnu data for that image */
-proc calculatePrnuComplex(h : int, w : int, image : [] RGB, ref data : prnu_data) {
+proc calculatePrnuComplex(h : int, w : int, image : [] RGB, ref data : prnu_data, prnuComplex : [] complex) {
   
   /* Create a domain for an image and allocate the image itself */
   const imageDomain: domain(2) = {0..#h, 0..#w};
   
   var prnu : [imageDomain] real;
-  var prnuComplex : [imageDomain] complex; 
   
   prnuExecute(prnu, image, data);
 
   forall (i,j) in imageDomain {
     prnuComplex(i,j) = prnu(i,j) + 0i;
   }
-
-  return prnuComplex;
 }
 
-proc rotated180Prnu(h : int, w : int, prnu : [] complex) {
+proc rotated180Prnu(h : int, w : int, prnu : [] complex, prnuRot : [] complex) {
   const imageDomain: domain(2) = {0..#h, 0..#w};
-  var prnuRot : [imageDomain] complex;
 
   /* Rotate the matrix 180 degrees */
   forall (i,j) in imageDomain do 
     prnuRot(i,j) = prnu(h-i-1, w-j-1);
-
-  return prnuRot;
 }
 
 proc main() {
@@ -71,8 +66,7 @@ proc main() {
   var crossDomain : domain(1) = {0..#nrCorrelations};
 
   var crossTuples : [crossDomain] 2*int;
-  var data : [num] prnu_data;  
-  var overallTimer : Timer;
+  var overallTimer, prnuTimer, fftTimer, corrTimer, crossTimer : Timer;
 
   const imageDomain : domain(2) = {0..#h, 0..#w};
   const numDomain : domain(1) = {1..n};
@@ -114,6 +108,7 @@ proc main() {
 
     /* Perform all initializations here. Hence stopping the timer */
     overallTimer.stop();
+    var data : [numDomain] prnu_data;  
     var images : [imgSparseDom][imageDomain] RGB;
     var prnuArray : [prnuSparseDom][imageDomain] complex;
     var prnuRotArray : [prnuRotSparseDom][imageDomain] complex;
@@ -130,17 +125,21 @@ proc main() {
     /* Start the timer here */
     overallTimer.start();
 
+    prnuTimer.start();
     forall i in imgSparseDom {
       // Calculate the prnu of the required images
-      var prnu = calculatePrnuComplex(h, w, images[i], data(i));
+      var prnu : [imageDomain] complex;
+      calculatePrnuComplex(h, w, images[i], data(i), prnu);
       if prnuSparseDom.member(i) {
         prnuArray(i) = prnu;
       }
       if prnuRotSparseDom.member(i) {
-        prnuRotArray(i) = rotated180Prnu(h, w, prnu);
+        rotated180Prnu(h, w, prnu, prnuRotArray(i));
       }
     }
+    prnuTimer.stop();
 
+    fftTimer.start();
     for i in prnuSparseDom {
       fftPlan(i) = planFFT(prnuArray(i), FFTW_FORWARD);  
     }
@@ -160,14 +159,20 @@ proc main() {
         }
       }
     }
+    fftTimer.stop();
 
+    crossTimer.start();
     var resultComplex : [localSubDom][imageDomain] complex;
 
     forall it in localSubDom {
       var (i,j) = crossTuples(it);
-      resultComplex(it) = prnuArray(i) * prnuRotArray(j);
-    }
+      forall (x, y) in imageDomain {
+        resultComplex(it)(x,y) = prnuArray(i)(x,y) * prnuRotArray(j)(x,y);
+      }
+    } 
+    crossTimer.stop();
 
+    corrTimer.start();
     var fftPlanBack : [localSubDom] fftw_plan;
 
     // Plan the inverse fft
@@ -184,14 +189,15 @@ proc main() {
       var (i,j) = crossTuples(it);
       
       var result : [imageDomain] real = (resultComplex(it).re * resultComplex(it).re) / ((h*w) * (h*w));
+
       corrMatrix(i,j) = computeEverything(h, w, result);
     }
-
+    corrTimer.stop();
     // Increment by the number of correlations in 1 batch
-    idx += num;
 
     // Stopping the timer because the beginning of this loop is just initializations
     overallTimer.stop();
+    idx += num;
     forall i in imgSparseDom {
       prnuDestroy(data(i));
     }
@@ -199,6 +205,10 @@ proc main() {
   
   flushWriteln("The first value of the corrMatrix is: ", corrMatrix[2,1]);
   flushWriteln("Time: ", overallTimer.elapsed(), "s");
+  writeln("PRNU Time: ", prnuTimer.elapsed(), "s");
+  writeln("FFT Time: ", fftTimer.elapsed(), "s");
+  writeln("Cross Time : ", crossTimer.elapsed(), "s");
+  writeln("Corr TIme : ", corrTimer.elapsed(), "s");
 
   flushWriteln("Throughput: ", nrCorrelations / overallTimer.elapsed(), " corrs/s");
 
