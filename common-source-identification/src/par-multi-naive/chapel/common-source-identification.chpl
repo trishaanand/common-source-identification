@@ -75,7 +75,7 @@ proc main() {
   const corrDomain : domain(2) = {1..n, 1..n};
   var corrMatrix : [corrDomain] real;
   var nrCorrelations = (n * (n - 1)) / 2;
-  var crossDomain : domain(1) = {0..#nrCorrelations};
+  const crossDomain : domain(1) = {0..#nrCorrelations};
 
   var crossTuples : [crossDomain] 2*int;
   var totalTime : real;
@@ -104,8 +104,9 @@ proc main() {
 
   while(idx > 0) {
     flushWriteln("");
-    printLocalMemory("******* Beginning of while loop ******");
-    
+    // printGlobalMemory("******* Beginning of while loop ******");
+    // sleep(60);
+    printGlobalMemory("******* Continuing after sleep in while loop ******  ");
     var localRange : int;
     if (idx - num) < 0 {
       localRange = 0;
@@ -135,6 +136,7 @@ proc main() {
     // Executing the computation on all the locales here
     coforall loc in Locales do on loc {
       printLocalMemory("Beginning of coforall loc ");
+      // sleep(60);
       var imgSparseDom, prnuSparseDom, prnuRotSparseDom : sparse subdomain(imgGlobalDom);
       flushWriteln("On locale: ", here.id, ", Local subdomain of correlation matrix is ", localSubDom.localSubdomain());
       for it in localSubDom.localSubdomain() {
@@ -191,6 +193,11 @@ proc main() {
           prnuRotArray(i) = rotated180Prnu(h, w, prnu);
         }
       }
+
+      for i in numDomain {
+        prnuDestroy(data(i));
+      }
+
       for i in prnuSparseDom {
         fftPlan(i) = planFFT(prnuArray(i), FFTW_FORWARD);  
       }
@@ -211,7 +218,13 @@ proc main() {
         }
       }
       
-
+      for i in prnuSparseDom {
+        destroy_plan(fftPlan(i));
+      }
+      for i in prnuRotSparseDom {
+        destroy_plan(fftRotPlan(i));
+      }
+      
       forall it in localSubDom.localSubdomain() {
         var (i,j) = crossTuples(it);
         forall (x, y) in imageDomain {
@@ -228,6 +241,11 @@ proc main() {
       forall it in localSubDom.localSubdomain() {
         execute(fftPlanBack(it));
       }
+
+      for it in localSubDom.localSubdomain() {
+        destroy_plan(fftPlanBack(it));
+      }
+
       printLocalMemory("Before computing correlation matrix");
       /* Calculate correlation now */
       forall it in localSubDom.localSubdomain() {
@@ -237,10 +255,10 @@ proc main() {
 
         corrMatrix(i,j) = computeEverything(h, w, result);
       }
-
-      forall i in imgSparseDom {
-        prnuDestroy(data(i));
-      }
+      //clears fftw altogether. delete this line if shit goes awry
+      cleanup_threads();
+      cleanup();
+      
     }
     
     overallTimer.stop();

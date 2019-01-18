@@ -1,4 +1,4 @@
-use FFTW;
+use FFTW_MT;
 use Time;
 
 class PlusReduceOp: ReduceScanOp {
