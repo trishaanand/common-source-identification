@@ -22,38 +22,34 @@ config const imagedir : string = "images";
 config const writeOutput : bool = false;
 config const num : int = 100; 
 
-var data : prnu_data;  
-
 /* Given a file name this function calculates & returns the prnu data for that image */
-proc calculatePrnuComplex(h : int, w : int, image : [] RGB) {
+proc calculatePrnuComplex(h : int, w : int, image : [] RGB, prnuComplex : [] complex, ref data : prnu_data) {
   
   /* Create a domain for an image and allocate the image itself */
   const imageDomain: domain(2) = {0..#h, 0..#w};
 
   var prnu : [imageDomain] real;
-  var prnuComplex : [imageDomain] complex; 
   
   prnuExecute(prnu, image, data);
 
   for(i,j) in imageDomain {
     prnuComplex(i,j) = prnu(i,j) + 0i;
   }
-
-  return prnuComplex;
 }
 
-proc rotated180Prnu(h : int, w : int, prnu : [] complex) {
+proc rotated180Prnu(h : int, w : int, prnu : [] complex, prnuRot : [] complex) {
   const imageDomain: domain(2) = {0..#h, 0..#w};
-  var prnuRot : [imageDomain] complex;
 
   /* Rotate the matrix 180 degrees */
   for (i,j) in imageDomain do 
     prnuRot(i,j) = prnu(h-i-1, w-j-1);
-
-  return prnuRot;
 }
 
 proc main() {
+  run();
+}
+
+proc run() {
   /* Obtain the images. */
   var imageFileNames = getImageFileNames(imagedir);
 
@@ -68,18 +64,19 @@ proc main() {
 
   /* Create a domain for the correlation matrix. */
   const corrDomain : domain(2) = {1..n, 1..n};
+  const imageDomain : domain(2) = {0..#h, 0..#w};
+  const numDomain : domain(1) = {1..n};
+
   var corrMatrix : [corrDomain] real;
   var nrCorrelations = (n * (n - 1)) / 2;
   var crossDomain : domain(1) = {0..#nrCorrelations};
-
   var crossTuples : [crossDomain] 2*int;
+  
+  var data : prnu_data;  
+  var prnu, prnuRot, resultComplex : [imageDomain] complex;
 
-  var overallTimer, fftTimer, corrTimer : Timer;
-  var t1Timer, t2Timer, t3Timer, t4Timer, t5Timer : real;
-  var sumt1Timer, sumt2Timer, sumt3Timer, sumt4Timer, sumt5Timer : real;
+  var overallTimer : Timer;
 
-  const imageDomain : domain(2) = {0..#h, 0..#w};
-  const numDomain : domain(1) = {1..n};
 
   flushWriteln("Running Common Source Identification...");
   flushWriteln("  ", n, " images");
@@ -95,67 +92,48 @@ proc main() {
 
   /* Perform all initializations here */
   prnuInit(h, w, data);
-  
-  var idx : int = 0;
 
-  while(idx < nrCorrelations) {
-    overallTimer.start();
-    var localRange : int;
-    if (idx + num) >= nrCorrelations {
-      localRange = nrCorrelations-1;
-    } else {
-      localRange = idx + num - 1;
-    }
+  var fwPlan = plan_dft(prnu, prnu, FFTW_FORWARD, FFTW_ESTIMATE);
+  var fwPlanRot = plan_dft(prnuRot, prnuRot, FFTW_FORWARD, FFTW_ESTIMATE);
+  var bwPlan = plan_dft(resultComplex, resultComplex, FFTW_BACKWARD, FFTW_ESTIMATE);
 
-    const localSubDom : domain(1) = {idx..localRange};
-    var imgSparseDom, prnuSparseDom, prnuRotSparseDom : sparse subdomain(numDomain);
+  for idx in crossDomain {
+    var (i,j) = crossTuples(idx);
+
+    // Read both the images from disk 
+    var images : [2][imageDomain] RGB;
+    readJPG(images[0], imageFileNames[i]);
+    readJPG(images[1], imageFileNames[j]);
     
-    for it in localSubDom {
-      var (i,j) = crossTuples(it);
-      imgSparseDom += i;
-      imgSparseDom += j;
-      prnuSparseDom += i; 
-      prnuRotSparseDom += j;
-    }
-    var images : [imgSparseDom][imageDomain] RGB;
-    var prnuArray : [prnuSparseDom][imageDomain] complex;
-    var prnuRotArray : [prnuRotSparseDom][imageDomain] complex;
-    overallTimer.stop();
-
-    for i in imgSparseDom {
-      readJPG(images[i], imageFileNames[i]);
-    }
-
-    /* Start the timer here */
     overallTimer.start();
 
-    for i in imgSparseDom {
-      // Calculate the prnu of the required images
-      var prnu = calculatePrnuComplex(h, w, images[i]);
-      if prnuSparseDom.member(i) {
-        prnuArray(i) = prnu;
-        calculateFFT(prnuArray(i), FFTW_FORWARD);
-      }
-      if prnuRotSparseDom.member(i) {
-        prnuRotArray(i) = rotated180Prnu(h, w, prnu);
-        calculateFFT(prnuRotArray(i), FFTW_FORWARD);
-      }
+    var prnuTemp : [imageDomain] complex;
+    calculatePrnuComplex(h, w, images[0], prnu, data);
+    calculatePrnuComplex(h, w, images[1], prnuTemp, data);
+    rotated180Prnu(h, w, prnuTemp, prnuRot);
+
+    // Calculate the FFT on the prnu & rot arrays
+    execute(fwPlan);
+    execute(fwPlanRot);
+
+    // Calculate the dot product
+    for (x,y) in imageDomain {
+      resultComplex(x,y) = prnu(x,y) * prnuRot(x,y);
     }
 
-    /* Calculate correlation now */
-    for it in localSubDom {
-      var (i,j) = crossTuples(it);
-      corrMatrix(i,j) = computeEverything(h, w, prnuArray(i), prnuRotArray(j));
-    }
+    // Inverse FFT
+    execute(bwPlan);
 
-    // Increment by the number of correlations in 1 batch
-    idx += num;
-
-    // Stopping the timer because the beginning of this loop is just initializations
+    corrMatrix(i,j) = computePCE(h, w, resultComplex);
     overallTimer.stop();
   }
-  
+
+  // Cleanup everything
   prnuDestroy(data);
+  destroy_plan(fwPlan);
+  destroy_plan(fwPlanRot);
+  destroy_plan(bwPlan);
+  cleanup();
 
   flushWriteln("The first value of the corrMatrix is: ", corrMatrix[2,1]);
   flushWriteln("Time: ", overallTimer.elapsed(), "s");

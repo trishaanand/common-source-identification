@@ -1,25 +1,10 @@
-use FFTW_MT;
+use FFTW;
 use Math;
 use Time;
 
-/* prnu is passed by reference. Hence not returning any value from the FFT calculation */
-proc calculateFFT(prnu : [] complex, sign : c_int) {
-    var fftPlan = plan_dft(prnu, prnu, sign, FFTW_ESTIMATE);
-    execute(fftPlan);
-}
-
-proc computeEverything(h : int, w : int, prnuComplex : [] complex, prnuRotComplex : [] complex) {
+proc computePCE(h : int, w : int, resultComplex : [] complex) {
     const imageDomain: domain(2) = {0..#h, 0..#w};
-    var resultComplex : [imageDomain] complex;
     var result : [imageDomain] real;
-
-    // Calculate the point wise product of both matrices
-    for (i,j) in imageDomain do {
-        resultComplex(i,j) = prnuComplex(i,j) * prnuRotComplex(i,j);
-    }
-
-    // Calculate inverse FFT of the result
-    calculateFFT(resultComplex, FFTW_BACKWARD);
 
     // Scale the result
     for(i,j) in imageDomain {
