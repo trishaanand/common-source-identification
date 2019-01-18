@@ -21,7 +21,7 @@ use utils;
 /* Configuration parameters */
 config const imagedir : string = "images";
 config const writeOutput : bool = false;
-config const num : int = 50; 
+config const num : int = 10; 
 
 /* Given a file name this function calculates & returns the prnu data for that image */
 proc calculatePrnuComplex(h : int, w : int, image : [] RGB, ref data : prnu_data, prnuComplex : [] complex) {
@@ -76,6 +76,8 @@ proc main() {
   flushWriteln("  ", numLocales, " locale(s)");
 
   /* ************************* Start here ********************* */
+  //crossTuple stores the mapping between the cross domain and images required.
+  //i is for prnu, j would be for rotation.
   forall (i,j) in corrDomain {
     if (i > j) {
         var idx = (((i-1) * (i - 1 -1)) / 2 ) + (j - 1);
@@ -84,9 +86,23 @@ proc main() {
   }
 
   var idx : int = 0;
+  
+  var data : [numDomain] prnu_data;  
+  for i in numDomain {
+    prnuInit(h, w, data(i));
+  }
+  printGlobalMemory("******* After prnuInit ******");
+  //Sleep is used to manually read /proc/meminfo on the locale.
+  // sleep(60);
 
   while(idx < nrCorrelations) {
+    printGlobalMemory("******* Beginning of while loop ******");
+    // sleep(60);
+    // printGlobalMemory("******* Continuing after sleep in while loop ******  ");
+
     overallTimer.start();
+
+    //Calculating the range of correlations for this batch iteration.
     var localRange : int;
     if (idx + num) >= nrCorrelations {
       localRange = nrCorrelations-1;
@@ -95,11 +111,14 @@ proc main() {
     }
 
     const localSubDom : domain(1) = {idx..localRange};
+    //Sparse domains store the indices required for images, prnus and rotated prnus for calculating all
+    //the correlations for this batch.
     var imgSparseDom, prnuSparseDom, prnuRotSparseDom : sparse subdomain(numDomain);
     
     // Sequential iteration because we can't add indices to sparse in forall
     for it in localSubDom {
       var (i,j) = crossTuples(it);
+      //Append to the sparse domain index
       imgSparseDom += i;
       imgSparseDom += j;
       prnuSparseDom += i; 
@@ -108,16 +127,12 @@ proc main() {
 
     /* Perform all initializations here. Hence stopping the timer */
     overallTimer.stop();
-    var data : [numDomain] prnu_data;  
     var images : [imgSparseDom][imageDomain] RGB;
     var prnuArray : [prnuSparseDom][imageDomain] complex;
     var prnuRotArray : [prnuRotSparseDom][imageDomain] complex;
     var fftPlan : [prnuSparseDom] fftw_plan;
     var fftRotPlan : [prnuRotSparseDom] fftw_plan;
 
-    for i in imgSparseDom {
-      prnuInit(h, w, data(i));
-    }
     for i in imgSparseDom {
       readJPG(images[i], imageFileNames[i]);
     }
@@ -126,8 +141,8 @@ proc main() {
     overallTimer.start();
 
     prnuTimer.start();
+    //for all images required in this batch, calculate prnu.
     forall i in imgSparseDom {
-      // Calculate the prnu of the required images
       var prnu : [imageDomain] complex;
       calculatePrnuComplex(h, w, images[i], data(i), prnu);
       if prnuSparseDom.member(i) {
@@ -160,10 +175,18 @@ proc main() {
       }
     }
     fftTimer.stop();
+    //Destroy the fft plans
+    for i in prnuSparseDom {
+      destroy_plan(fftPlan(i));
+    }
+    for i in prnuRotSparseDom {
+      destroy_plan(fftRotPlan(i));
+    }
 
     crossTimer.start();
     var resultComplex : [localSubDom][imageDomain] complex;
 
+    //Calculate dot product of prnu and rotated prnu array and save it in resultComplex
     forall it in localSubDom {
       var (i,j) = crossTuples(it);
       forall (x, y) in imageDomain {
@@ -184,12 +207,17 @@ proc main() {
       execute(fftPlanBack(it));
     }
 
-    /* Calculate correlation now */
+   for it in localSubDom {
+      destroy_plan(fftPlanBack(it));
+    }
+
+    /* scale and compute pce now */
     forall it in localSubDom {
       var (i,j) = crossTuples(it);
       
       var result : [imageDomain] real = (resultComplex(it).re * resultComplex(it).re) / ((h*w) * (h*w));
 
+      //computeEverything : finds the peak, calculates sum, and then returns the PCE
       corrMatrix(i,j) = computeEverything(h, w, result);
     }
     corrTimer.stop();
@@ -198,9 +226,8 @@ proc main() {
     // Stopping the timer because the beginning of this loop is just initializations
     overallTimer.stop();
     idx += num;
-    forall i in imgSparseDom {
-      prnuDestroy(data(i));
-    }
+    cleanup_threads();
+    cleanup();
   }
   
   flushWriteln("The first value of the corrMatrix is: ", corrMatrix[2,1]);
@@ -211,6 +238,17 @@ proc main() {
   writeln("Corr TIme : ", corrTimer.elapsed(), "s");
 
   flushWriteln("Throughput: ", nrCorrelations / overallTimer.elapsed(), " corrs/s");
+  flushWriteln("Sleep before destoy plans for prnu data");
+  sleep(60);
+  forall i in numDomain {
+    prnuDestroy(data(i));
+  }
+  complete_destruction();
+  flushWriteln("Sleep after destroy plans for prnu data");
+
+  /* IMP : Seeing a memory leak of 4GB when run for 10 images with batch size of 10 */
+  sleep(60);
+  printGlobalMemory("******* After everything is done ******");
 
   if (writeOutput) {
     flushWriteln("Writing output files...");
