@@ -7,11 +7,7 @@ use FileSystem;
 /* Time the execution. */
 use Time;
 
-/* Block distribution module */
 use BlockDist;
-
-/* Build the wall! */
-use Barriers;
 
 /* Read in JPG images. */
 use read_jpg;
@@ -23,42 +19,42 @@ use prnu;
 use fft;
 use utils;
 
-
 /* Configuration parameters */
 config const imagedir : string = "images";
 config const writeOutput : bool = false;
-config const batchNum : int = 10; 
+config const numThreads : int = 8; 
 
 /* Given a file name this function calculates & returns the prnu data for that image */
-proc calculatePrnuComplex(h : int, w : int, image : [] RGB, ref data : prnu_data) {
+proc calculatePrnuComplex(h : int, w : int, image : [] RGB, prnuComplex : [] complex, ref data : prnu_data) {
   
   /* Create a domain for an image and allocate the image itself */
   const imageDomain: domain(2) = {0..#h, 0..#w};
-  
+
   var prnu : [imageDomain] real;
-  var prnuComplex : [imageDomain] complex; 
   
   prnuExecute(prnu, image, data);
 
   forall (i,j) in imageDomain {
     prnuComplex(i,j) = prnu(i,j) + 0i;
   }
-
-  return prnuComplex;
 }
 
-proc rotated180Prnu(h : int, w : int, prnu : [] complex) {
+proc rotated180Prnu(h : int, w : int, prnu : [] complex, prnuRot : [] complex) {
   const imageDomain: domain(2) = {0..#h, 0..#w};
-  var prnuRot : [imageDomain] complex;
 
   /* Rotate the matrix 180 degrees */
   forall (i,j) in imageDomain do 
     prnuRot(i,j) = prnu(h-i-1, w-j-1);
-
-  return prnuRot;
 }
 
+proc readImage(i: int, imageDomain:domain) {
+  var image : [imageDomain]RGB;
+}
 proc main() {
+  run();
+}
+
+proc run() {
   /* Obtain the images. */
   var imageFileNames = getImageFileNames(imagedir);
 
@@ -73,21 +69,21 @@ proc main() {
 
   /* Create a domain for the correlation matrix. */
   const corrDomain : domain(2) = {1..n, 1..n};
-  var corrMatrix : [corrDomain] real;
-  var nrCorrelations = (n * (n - 1)) / 2;
-  const crossDomain : domain(1) = {0..#nrCorrelations};
-
-  var crossTuples : [crossDomain] 2*int;
-  var totalTime : real;
-  var overallTimer : Timer;
-
   const imageDomain : domain(2) = {0..#h, 0..#w};
   const numDomain : domain(1) = {1..n};
-  
+  const threadDomain : domain(1) = {0..#numThreads};
+
+  var corrMatrix : [corrDomain] real;
+  var nrCorrelations = (n * (n - 1)) / 2;
+  var crossDomain = {0..#nrCorrelations} dmapped Block({0..#nrCorrelations});
+  var crossTuples : [crossDomain] 2*int;
+  const localeDomain = {0..#numLocales} dmapped Block ({0..#numLocales});
+  var overallTimerLoc : [localeDomain] real;
+
   flushWriteln("Running Common Source Identification...");
   flushWriteln("  ", n, " images");
   flushWriteln("  ", numLocales, " locale(s)");
-  flushWriteln("  ", batchNum, " batchNum");
+  flushWriteln("  ", numThreads, " numThreads");
 
   /* ************************* Start here ********************* */
   forall (i,j) in corrDomain {
@@ -97,179 +93,108 @@ proc main() {
     }
   }
 
-  var idx : int = nrCorrelations - 1;
-  
-  //batchNum is a config variable which defines max number of correlations per locale in a single batch 
-  var num = batchNum * Locales.size;
 
-  while(idx > 0) {
-    flushWriteln("");
-    // printGlobalMemory("******* Beginning of while loop ******");
-    // sleep(60);
-    printGlobalMemory("******* Continuing after sleep in while loop ******  ");
-    var localRange : int;
-    if (idx - num) < 0 {
-      localRange = 0;
-    } else {
-      localRange = idx - num + 1;
+  class ThreadData {
+    var prnu, prnuRot, resultComplex : [imageDomain] complex;
+    var fwPlan : fftw_plan;
+    var fwPlanRot : fftw_plan;
+    var bwPlan : fftw_plan;
+
+    proc deinit() {
+      flushWriteln("In the ThreadData deconstructor ");
+      // prnuDestroy(data);
+      destroy_plan(fwPlan);
+      destroy_plan(fwPlanRot);
+      destroy_plan(bwPlan);
     }
-
-    var imgGlobalDom : sparse subdomain(numDomain);
-    const localSubDom = {localRange..idx} dmapped Block({localRange..idx});
-
-    for it in localSubDom {
-      var (i,j) = crossTuples(it);
-      imgGlobalDom += i;
-      imgGlobalDom += j;
-    }
-
-    var globalImages : [imgGlobalDom][imageDomain]RGB; 
-    for i in imgGlobalDom {
-      readJPG(globalImages[i], imageFileNames[i]);
-    }
-
-    // Define the barrier to delete globalImgs once they've been copied to respective locales
-    var b = new Barrier(Locales.size);
-
-    overallTimer.start();
-
-    // Executing the computation on all the locales here
-    coforall loc in Locales do on loc {
-      printLocalMemory("Beginning of coforall loc ");
-      // sleep(60);
-      var imgSparseDom, prnuSparseDom, prnuRotSparseDom : sparse subdomain(imgGlobalDom);
-      flushWriteln("On locale: ", here.id, ", Local subdomain of correlation matrix is ", localSubDom.localSubdomain());
-      for it in localSubDom.localSubdomain() {
-        var (i,j) = crossTuples(it);
-        imgSparseDom += i;
-        imgSparseDom += j;
-        prnuSparseDom += i; 
-        prnuRotSparseDom += j;
-      }
-      
-      flushWriteln("ImageSparseDom: ", imgSparseDom.size, " on locale: ", here.id, "  ", imgSparseDom);
-      flushWriteln("prnuSparseDom: ", prnuSparseDom.size, " on locale: ", here.id, "  ", prnuSparseDom);
-      flushWriteln("prnuRotSparseDom: ", prnuRotSparseDom.size, " on locale: ", here.id, "  ", prnuRotSparseDom);
-      flushWriteln("On locale: ", here.id, ", the number of correlations for which result is calc is : ", localSubDom.localSubdomain().size);
-
-      printLocalMemory("Before data");
-      var data : [numDomain] prnu_data;
-      printLocalMemory("After data, before image");  
-      var images : [imgSparseDom][imageDomain] RGB;
-      printLocalMemory("After images, before PRNU");
-      var prnuArray : [prnuSparseDom][imageDomain] complex;
-      printLocalMemory("After PRNU, before Rot");
-      var prnuRotArray : [prnuRotSparseDom][imageDomain] complex;
-      printLocalMemory("After ROT, before fft plan");
-      var fftPlan : [prnuSparseDom] fftw_plan;
-      printLocalMemory("After fft plan, before fft rot plan");
-      var fftRotPlan : [prnuRotSparseDom] fftw_plan;
-      printLocalMemory("After fft rot plan, before resultComplex");
-      var resultComplex : [localSubDom.localSubdomain()][imageDomain] complex;
-      printLocalMemory("After allocating resultComplex");
-
-      // Must be sequential because prnuInit includes an FFT step that cannot be parralellized
-      for i in imgSparseDom {
-        prnuInit(h, w, data(i));
-      }
-      forall i in imgSparseDom {
-        images[i] = globalImages[i];
-      }
-
-      // Call the barrier. Delete the imgGlobalDom
-      b.barrier();
-      imgGlobalDom.clear();
-      flushWriteln("Global Images array size: ", globalImages.size);
-      
-      flushWriteln("On locale: ", here.id, ", size of images is : ", images.size);
-
-      forall i in imgSparseDom {
-        // Calculate the prnu of the required images
-        var prnu = calculatePrnuComplex(h, w, images[i], data(i));
-        if prnuSparseDom.member(i) {
-          prnuArray(i) = prnu;
-        }
-        if prnuRotSparseDom.member(i) {
-          prnuRotArray(i) = rotated180Prnu(h, w, prnu);
-        }
-      }
-
-      for i in numDomain {
-        prnuDestroy(data(i));
-      }
-
-      for i in prnuSparseDom {
-        fftPlan(i) = planFFT(prnuArray(i), FFTW_FORWARD);  
-      }
-      for j in prnuRotSparseDom {
-        fftRotPlan(j) = planFFT(prnuRotArray(j), FFTW_FORWARD);
-      }
-
-      sync {
-        begin {
-          forall i in prnuSparseDom {
-            execute(fftPlan(i));
-          }
-        }
-        begin {
-          forall i in prnuRotSparseDom {
-            execute(fftRotPlan(i));
-          }
-        }
-      }
-      
-      for i in prnuSparseDom {
-        destroy_plan(fftPlan(i));
-      }
-      for i in prnuRotSparseDom {
-        destroy_plan(fftRotPlan(i));
-      }
-      
-      forall it in localSubDom.localSubdomain() {
-        var (i,j) = crossTuples(it);
-        forall (x, y) in imageDomain {
-          resultComplex(it)(x,y) = prnuArray(i)(x,y) * prnuRotArray(j)(x,y);
-        }
-      } 
-      var fftPlanBack : [localSubDom.localSubdomain()] fftw_plan;
-      
-      // Plan the inverse fft
-      for it in localSubDom.localSubdomain() {
-        fftPlanBack(it) = planFFT(resultComplex(it), FFTW_BACKWARD) ; 
-      }
-
-      forall it in localSubDom.localSubdomain() {
-        execute(fftPlanBack(it));
-      }
-
-      for it in localSubDom.localSubdomain() {
-        destroy_plan(fftPlanBack(it));
-      }
-
-      printLocalMemory("Before computing correlation matrix");
-      /* Calculate correlation now */
-      forall it in localSubDom.localSubdomain() {
-        var (i,j) = crossTuples(it);
-        
-        var result : [imageDomain] real = (resultComplex(it).re * resultComplex(it).re) / ((h*w) * (h*w));
-
-        corrMatrix(i,j) = computeEverything(h, w, result);
-      }
-      //clears fftw altogether. delete this line if shit goes awry
-      cleanup_threads();
-      cleanup();
-      
-    }
-    
-    overallTimer.stop();
-    // Increment by the number of correlations in 1 batch
-    idx -= num;
-    printGlobalMemory("At the end of batch processing step in while : ");
   }
+
+  coforall loc in Locales do on loc {
+    flushWriteln("Entered coforall on locale : ", here.id);
+    // Create a timer for each thread. We'll sum these timers to get the overall time
+    var threadTimer : [threadDomain] Timer;
+    var crossSubDomain = crossDomain.localSubdomain();
+    var threadArray : [threadDomain] ThreadData;
+    var data : [threadDomain] prnu_data;
+
+    // This is the number of correlations that must be performed by each thread
+    var defaultNum = crossSubDomain.size/numThreads : int;
+    var rem = crossSubDomain.size % numThreads;
+    var high : int;
+    var threadTuples : [threadDomain] 2*int;
+    high = crossSubDomain.low - 1; 
+
+    // Calculate the indices of the the corrMatrix that each thread will compute over
+    // IMP: Must be sequential else it throws a segmentation fault
+    for thread in threadDomain {
+      var low = high + 1; 
+      var num = defaultNum;
+      if thread < rem {
+        num = defaultNum + 1;
+      }
+      high = low + num -1;
+      threadTuples(thread) = (low, high);
+      // Init all the data
+      prnuInit(h, w, data[thread]);
+      threadArray[thread] = new unmanaged ThreadData();
+      threadArray[thread].fwPlan = plan_dft(threadArray[thread].prnu, threadArray[thread].prnu, FFTW_FORWARD, FFTW_ESTIMATE);
+      threadArray[thread].fwPlanRot = plan_dft(threadArray[thread].prnuRot, threadArray[thread].prnuRot, FFTW_FORWARD, FFTW_ESTIMATE);
+      threadArray[thread].bwPlan = plan_dft(threadArray[thread].resultComplex, threadArray[thread].resultComplex, FFTW_BACKWARD, FFTW_ESTIMATE);
+    }
+
+    coforall thread in threadDomain {
+      // Start the thread timer
+      threadTimer[thread].start();
+
+      var prnuTemp : [imageDomain] complex;
+      var images : [2][imageDomain] RGB;
+
+      var localSubDom : domain(1) = {threadTuples(thread)[1]..threadTuples(thread)[2]};
+      threadTimer[thread].stop();
+      // Sequentially iterate over the localSubdom. MUST BE SEQUENTIAL because of FFT crap
+      for idx in localSubDom {
+        var (i,j) = crossTuples(idx);
+
+        // Read both the images from disk 
+        on Locales[0] do {
+          readJPG(images[0], imageFileNames[i]);
+          readJPG(images[1], imageFileNames[j]);
+        }
+
+        // Start the thread timer
+        threadTimer[thread].start();
+
+        calculatePrnuComplex(h, w, images[0], threadArray[thread].prnu, data[thread]);
+        calculatePrnuComplex(h, w, images[1], prnuTemp, data[thread]);
+        rotated180Prnu(h, w, prnuTemp, threadArray[thread].prnuRot);
+
+        // Calculate the FFT on the prnu & rot arrays
+        execute(threadArray[thread].fwPlan);
+        execute(threadArray[thread].fwPlanRot);
+
+        // Calculate the dot product
+        threadArray[thread].resultComplex = threadArray[thread].prnu * threadArray[thread].prnuRot;
+        
+        // Inverse FFT
+        execute(threadArray[thread].bwPlan);
+
+        corrMatrix(i,j) = computePCE(h, w, threadArray[thread].resultComplex);
+        threadTimer[thread].stop();
+      }
+      // Cleanup everything
+      // delete threadArray[thread];
+    }
+    overallTimerLoc[loc.id] = max reduce threadTimer.elapsed();
+
+  }
+
+  cleanup();
   
+  var overallTimer = max reduce overallTimerLoc;
   flushWriteln("The first value of the corrMatrix is: ", corrMatrix[2,1]);
-  flushWriteln("Time: ", overallTimer.elapsed(), "s");
-  flushWriteln("Throughput: ", nrCorrelations / overallTimer.elapsed(), " corrs/s");
+  flushWriteln("Time: ", overallTimer, "s");
+
+  flushWriteln("Throughput: ", nrCorrelations / overallTimer, " corrs/s");
 
   if (writeOutput) {
     flushWriteln("Writing output files...");
