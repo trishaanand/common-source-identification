@@ -12,10 +12,6 @@ class PlusReduceOp: ReduceScanOp {
   proc clone()          return new unmanaged PlusReduceOp(eltType=eltType);
 }
 
-proc planFFT(prnu : [] complex, sign : c_int) {
-    return plan_dft(prnu, prnu, sign, FFTW_ESTIMATE);
-}
-
 proc getMax(result : [] real, h : int, w : int) {
     const imageDomain: domain(2) = {0..#h, 0..#w};
     var lowI, highI, lowJ, highJ : int;
@@ -31,9 +27,11 @@ proc getMax(result : [] real, h : int, w : int) {
     return (max, lowI, highI, lowJ, highJ);
 }
 
-proc computeEverything(h : int, w : int, ref result : [] real) {
+proc computePCE(h : int, w : int, resultComplex : [] complex) {
     const imageDomain: domain(2) = {0..#h, 0..#w};
-
+    
+    var result : [imageDomain] real = (resultComplex.re * resultComplex.re) / ((h*w) * (h*w));
+    
     var (max, lowI, highI, lowJ, highJ) = getMax(result, h, w);
     var sum = + reduce result;
     
