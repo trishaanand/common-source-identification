@@ -164,10 +164,8 @@ proc run() {
       execute(threadArray[thread].fwPlanRot);
 
       // Calculate the dot product
-      forall (x,y) in imageDomain {
-        threadArray[thread].resultComplex(x,y) = threadArray[thread].prnu(x,y) * threadArray[thread].prnuRot(x,y);
-      }
-
+      threadArray[thread].resultComplex = threadArray[thread].prnu * threadArray[thread].prnuRot;
+      
       // Inverse FFT
       execute(threadArray[thread].bwPlan);
 
