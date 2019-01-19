@@ -79,6 +79,7 @@ proc run() {
   flushWriteln("Running Common Source Identification...");
   flushWriteln("  ", n, " images");
   flushWriteln("  ", numLocales, " locale(s)");
+  flushWriteln("  ", numThreads, " numThreads");
 
   /* ************************* Start here ********************* */
   forall (i,j) in corrDomain {
@@ -96,11 +97,6 @@ proc run() {
     var fwPlan : fftw_plan;
     var fwPlanRot : fftw_plan;
     var bwPlan : fftw_plan;
-
-    /* Perform all initializations here */
-    proc init() {
-      flushWriteln("In the ThreadData constructor ");
-    }
 
     proc deinit() {
       flushWriteln("In the ThreadData deconstructor ");
@@ -131,7 +127,6 @@ proc run() {
     }
     high = low + num -1;
     threadTuples(thread) = (low, high);
-    flushWriteln("For thread: " , thread, " Got lowIdx: ", low, " highIdx: ", high);
     // Init all the data
     prnuInit(h, w, data[thread]);
     threadArray[thread] = new unmanaged ThreadData();
@@ -141,12 +136,14 @@ proc run() {
   }
 
   coforall thread in threadDomain {
+    // Start the thread timer
+    threadTimer[thread].start();
+
     var prnuTemp : [imageDomain] complex;
     var images : [2][imageDomain] RGB;
 
     var localSubDom : domain(1) = {threadTuples(thread)[1]..threadTuples(thread)[2]};
-    flushWriteln("For thread: ", thread, " localSubdomain: ", localSubDom);
-
+    threadTimer[thread].stop();
     // Sequentially iterate over the localSubdom. MUST BE SEQUENTIAL because of FFT crap
     for idx in localSubDom {
       var (i,j) = crossTuples(idx);
@@ -176,8 +173,6 @@ proc run() {
 
       corrMatrix(i,j) = computePCE(h, w, threadArray[thread].resultComplex);
       threadTimer[thread].stop();
-
-      flushWriteln("For ", idx, " PCE: ", corrMatrix(i,j));
     }
     // Cleanup everything
     // delete threadArray[thread];

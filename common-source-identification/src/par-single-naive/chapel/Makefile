@@ -42,6 +42,11 @@ cleanoutput:
 # Clean everyting
 cleanall: clean cleanslurm cleanoutput
 
-# Run the prnu
-run: 
-	./common-source-identification --writeOutput --numThreads 5
+# Run the code
+run10: 
+	./common-source-identification --writeOutput --numThreads 10
+
+run6: 
+	./common-source-identification --writeOutput --numThreads 6
+
+run: run6 run10
