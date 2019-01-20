@@ -54,7 +54,37 @@ proc readImage(i: int, imageDomain:domain) {
   var image : [imageDomain]RGB;
 }
 
+proc tryRun() {
+  // var count: atomic int; // our counter
+  var lock$: sync bool;   // the mutex lock
+
+  // count.write(1);       // Only let two tasks in at a time.
+  lock$.writeXF(true);  // Set lock$ to full (unlocked)
+  // Note: The value doesnt actually matter, just the state
+  // (full:unlocked / empty:locked)
+  // Also, writeXF() fills (F) the sync var regardless of its state (X)
+
+  coforall task in 1..5 { // Generate tasks
+    // Create a barrier
+    // do {
+    lock$;                 // Read lock$ (wait)
+    // } while (count.read() < 0); // Keep waiting until a spot opens up
+
+    lock$.readFE(); 
+
+    // Actual 'work'
+    flushWriteln("Task #", task, " doing work.");
+    sleep(10);
+
+    // count.sub(1);          // decrement the counter
+    // count.add(1);        // Increment the counter
+    flushWriteln("Task #", task, " after sleep.");
+    lock$.writeXF(true); // Set lock$ to full (signal)
+  }
+}
+
 proc main() {
+  // tryRun();
   run();
 }
 
@@ -75,7 +105,6 @@ proc run() {
   const corrDomain : domain(2) = {1..n, 1..n};
   const imageDomain : domain(2) = {0..#h, 0..#w};
   const numDomain : domain(1) = {1..n};
-  const threadDomain : domain(1) = {0..#numThreads};
 
   var corrMatrix : [corrDomain] real;
   var nrCorrelations = (n * (n - 1)) / 2;
@@ -117,97 +146,103 @@ proc run() {
 
   coforall loc in Locales do on loc {
     // tagVdebug("Coforall Locales");
-    flushWriteln("Entered coforall on locale : ", here.id);
-    // Create a timer for each thread. We'll sum these timers to get the overall time
-    var threadTimer : [threadDomain] Timer;
     var crossSubDomain = crossDomain.localSubdomain();
-    var threadArray : [threadDomain] ThreadData;
-    var data : [threadDomain] prnu_data;
-    var h_loc, w_loc : int;
-    h_loc = h;
-    w_loc = w;
-    var imageDomainLoc : domain(2) = {0..#h_loc, 0..#w_loc};
-
-    // This is the number of correlations that must be performed by each thread
-    var defaultNum = crossSubDomain.size/numThreads : int;
-    var rem = crossSubDomain.size % numThreads;
-    var high : int;
-    var threadTuples : [threadDomain] 2*int;
-    high = crossSubDomain.low - 1; 
-
-    // Calculate the indices of the the corrMatrix that each thread will compute over
-    // IMP: Must be sequential else it throws a segmentation fault
-    for thread in threadDomain {
-      var low = high + 1; 
-      var num = defaultNum;
-      if thread < rem {
-        num = defaultNum + 1;
-      }
-      high = low + num -1;
-      threadTuples(thread) = (low, high);
-      // Init all the data
-      prnuInit(h_loc, w_loc, data[thread]);
-      threadArray[thread] = new unmanaged ThreadData();
-      threadArray[thread].fwPlan = plan_dft(threadArray[thread].prnu, threadArray[thread].prnu, FFTW_FORWARD, FFTW_ESTIMATE);
-      threadArray[thread].fwPlanRot = plan_dft(threadArray[thread].prnuRot, threadArray[thread].prnuRot, FFTW_FORWARD, FFTW_ESTIMATE);
-      threadArray[thread].bwPlan = plan_dft(threadArray[thread].resultComplex, threadArray[thread].resultComplex, FFTW_BACKWARD, FFTW_ESTIMATE);
+    flushWriteln("Entered coforall on locale : ", here.id, ", with subdomain size : ", crossSubDomain.size);
+    var localNumThreads = numThreads;
+    if (crossSubDomain.size < localNumThreads) {
+      localNumThreads = crossSubDomain.size;
     }
+    if (localNumThreads != 0) {
+      // This is the number of correlations that must be performed by each thread
+      var threadDomain : domain(1) = {0..#localNumThreads};
+      // Create a timer for each thread. We'll sum these timers to get the overall time
+      var threadTimer : [threadDomain] Timer;
+      var threadArray : [threadDomain] ThreadData;
+      var data : [threadDomain] prnu_data;
+      var h_loc, w_loc : int;
+      h_loc = h;
+      w_loc = w;
+      var imageDomainLoc : domain(2) = {0..#h_loc, 0..#w_loc};
+      var defaultNum = crossSubDomain.size/localNumThreads : int;
+      var rem = crossSubDomain.size % localNumThreads;
+      var high : int;
+      var threadTuples : [threadDomain] 2*int;
+      high = crossSubDomain.low - 1; 
 
-    coforall thread in threadDomain {
-      // tagVdebug("Inside thread");
-      // Start the thread timer
-      threadTimer[thread].start();
-      var prnuTemp : [imageDomainLoc] complex;
-      var images : [2][imageDomainLoc] RGB;
-
-      var localSubDom : domain(1) = {threadTuples(thread)[1]..threadTuples(thread)[2]};
-      // threadTimer[thread].stop();
-      // Sequentially iterate over the localSubdom. MUST BE SEQUENTIAL because of FFT crap
-      for idx in localSubDom {
-        var (i,j) = crossTuples(idx);
-
-        var flagI = if (i == threadArray[thread].i) then true else false;
-        var flagJ = if (j == threadArray[thread].j) then true else false;
-
-        //read both and compute
-        on Locales[0] do {
-          if (!flagI) then readJPG(images[0], imageFileNames[i]);
-          if (!flagJ) then readJPG(images[1], imageFileNames[j]);
+      // Calculate the indices of the the corrMatrix that each thread will compute over
+      // IMP: Must be sequential else it throws a segmentation fault
+      for thread in threadDomain {
+        var low = high + 1; 
+        var num = defaultNum;
+        if thread < rem {
+          num = defaultNum + 1;
         }
+        high = low + num -1;
+        threadTuples(thread) = (low, high);
+        // Init all the data
+        prnuInit(h_loc, w_loc, data[thread]);
+        threadArray[thread] = new unmanaged ThreadData();
+        threadArray[thread].fwPlan = plan_dft(threadArray[thread].prnu, threadArray[thread].prnu, FFTW_FORWARD, FFTW_ESTIMATE);
+        threadArray[thread].fwPlanRot = plan_dft(threadArray[thread].prnuRot, threadArray[thread].prnuRot, FFTW_FORWARD, FFTW_ESTIMATE);
+        threadArray[thread].bwPlan = plan_dft(threadArray[thread].resultComplex, threadArray[thread].resultComplex, FFTW_BACKWARD, FFTW_ESTIMATE);
+      }
+
+      coforall thread in threadDomain {
+        // tagVdebug("Inside thread");
         // Start the thread timer
-        // threadTimer[thread].start();
+        threadTimer[thread].start();
+        var prnuTemp : [imageDomainLoc] complex;
+        var images : [2][imageDomainLoc] RGB;
 
-        if (!flagI) then calculatePrnuComplex(h_loc, w_loc, images[0], threadArray[thread].prnu, data[thread]);
-        if (!flagJ) {
-          calculatePrnuComplex(h_loc, w_loc, images[1], prnuTemp, data[thread]);
-          rotated180Prnu(h_loc, w_loc, prnuTemp, threadArray[thread].prnuRot);
-        }
-
-        // Calculate the FFT on the prnu & rot arrays
-        execute(threadArray[thread].fwPlan);
-        execute(threadArray[thread].fwPlanRot);
-        
-        // Calculate the dot product
-        threadArray[thread].resultComplex = threadArray[thread].prnu * threadArray[thread].prnuRot;
-        
-        // Inverse FFT
-        execute(threadArray[thread].bwPlan);
-
-        corrMatrix(i,j) = computePCE(h_loc, w_loc, threadArray[thread].resultComplex);
-        threadArray[thread].i = i;
-        threadArray[thread].j = j;
+        var localSubDom : domain(1) = {threadTuples(thread)[1]..threadTuples(thread)[2]};
         // threadTimer[thread].stop();
-      }
-      threadTimer[thread].stop();
-      // Cleanup everything
-      // delete threadArray[thread];
-    }
-    overallTimerLoc[loc.id] = max reduce threadTimer.elapsed();
+        // Sequentially iterate over the localSubdom. MUST BE SEQUENTIAL because of FFT crap
+        for idx in localSubDom {
+          var (i,j) = crossTuples(idx);
 
-    // for thread in threadDomain {
-    //   delete threadArray[thread];
-    // }
-    // cleanup();
+          var flagI = if (i == threadArray[thread].i) then true else false;
+          var flagJ = if (j == threadArray[thread].j) then true else false;
+
+          //read both and compute
+          on Locales[0] do {
+            if (!flagI) then readJPG(images[0], imageFileNames[i]);
+            if (!flagJ) then readJPG(images[1], imageFileNames[j]);
+          }
+          // Start the thread timer
+          // threadTimer[thread].start();
+
+          if (!flagI) then calculatePrnuComplex(h_loc, w_loc, images[0], threadArray[thread].prnu, data[thread]);
+          if (!flagJ) {
+            calculatePrnuComplex(h_loc, w_loc, images[1], prnuTemp, data[thread]);
+            rotated180Prnu(h_loc, w_loc, prnuTemp, threadArray[thread].prnuRot);
+          }
+
+          // Calculate the FFT on the prnu & rot arrays
+          execute(threadArray[thread].fwPlan);
+          execute(threadArray[thread].fwPlanRot);
+          
+          // Calculate the dot product
+          threadArray[thread].resultComplex = threadArray[thread].prnu * threadArray[thread].prnuRot;
+          
+          // Inverse FFT
+          execute(threadArray[thread].bwPlan);
+
+          corrMatrix(i,j) = computePCE(h_loc, w_loc, threadArray[thread].resultComplex);
+          threadArray[thread].i = i;
+          threadArray[thread].j = j;
+          // threadTimer[thread].stop();
+        }
+        threadTimer[thread].stop();
+        // Cleanup everything
+        // delete threadArray[thread];
+      }
+      overallTimerLoc[loc.id] = max reduce threadTimer.elapsed();
+
+      // for thread in threadDomain {
+      //   delete threadArray[thread];
+      // }
+      // cleanup();
+    }
   }
   stopVdebug();
 
