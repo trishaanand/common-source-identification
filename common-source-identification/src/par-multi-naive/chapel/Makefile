@@ -45,4 +45,4 @@ cleanall: clean cleanslurm cleanoutput
 
 # Run the prnu
 run: 
-	./common-source-identification -nl 2 --writeOutput --memTrack
+	./common-source-identification -nl 4 --writeOutput --memTrack

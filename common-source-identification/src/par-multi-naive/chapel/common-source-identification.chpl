@@ -50,6 +50,7 @@ proc rotated180Prnu(h : int, w : int, prnu : [] complex, prnuRot : [] complex) {
 proc readImage(i: int, imageDomain:domain) {
   var image : [imageDomain]RGB;
 }
+
 proc main() {
   run();
 }
@@ -186,9 +187,13 @@ proc run() {
     }
     overallTimerLoc[loc.id] = max reduce threadTimer.elapsed();
 
+    for thread in threadDomain {
+      delete threadArray[thread];
+    }
+    cleanup();
   }
 
-  cleanup();
+
   
   var overallTimer = max reduce overallTimerLoc;
   flushWriteln("The first value of the corrMatrix is: ", corrMatrix[2,1]);
