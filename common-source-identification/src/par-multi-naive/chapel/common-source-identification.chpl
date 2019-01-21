@@ -80,7 +80,7 @@ proc run() {
   var crossTuples : [crossDomain] 2*int;
   const localeDomain = {0..#numLocales} dmapped Block ({0..#numLocales});
   var overallTimerLoc : [localeDomain] real;
-
+  
   flushWriteln("Running Common Source Identification...");
   flushWriteln("  ", n, " images");
   flushWriteln("  ", numLocales, " locale(s)");
@@ -94,7 +94,6 @@ proc run() {
     }
   }
 
-
   class ThreadData {
     var prnu, prnuRot, resultComplex : [imageDomain] complex;
     var fwPlan : fftw_plan;
@@ -102,7 +101,6 @@ proc run() {
     var bwPlan : fftw_plan;
 
     proc deinit() {
-      flushWriteln("In the ThreadData deconstructor ");
       // prnuDestroy(data);
       destroy_plan(fwPlan);
       destroy_plan(fwPlanRot);
@@ -111,7 +109,6 @@ proc run() {
   }
 
   coforall loc in Locales do on loc {
-    flushWriteln("Entered coforall on locale : ", here.id);
     // Create a timer for each thread. We'll sum these timers to get the overall time
     var threadTimer : [threadDomain] Timer;
     var crossSubDomain = crossDomain.localSubdomain();
@@ -148,7 +145,6 @@ proc run() {
       threadTimer[thread].start();
 
       var prnuTemp : [imageDomain] complex;
-      var images : [2][imageDomain] RGB;
 
       var localSubDom : domain(1) = {threadTuples(thread)[1]..threadTuples(thread)[2]};
       threadTimer[thread].stop();
@@ -157,16 +153,15 @@ proc run() {
         var (i,j) = crossTuples(idx);
 
         // Read both the images from disk 
-        on Locales[0] do {
-          readJPG(images[0], imageFileNames[i]);
-          readJPG(images[1], imageFileNames[j]);
-        }
+        var image, imageRot : [imageDomain] RGB;
+        readJPG(image, imageFileNames[i].localize());
+        readJPG(imageRot, imageFileNames[j].localize());
 
         // Start the thread timer
         threadTimer[thread].start();
 
-        calculatePrnuComplex(h, w, images[0], threadArray[thread].prnu, data[thread]);
-        calculatePrnuComplex(h, w, images[1], prnuTemp, data[thread]);
+        calculatePrnuComplex(h, w, image, threadArray[thread].prnu, data[thread]);
+        calculatePrnuComplex(h, w, imageRot, prnuTemp, data[thread]);
         rotated180Prnu(h, w, prnuTemp, threadArray[thread].prnuRot);
 
         // Calculate the FFT on the prnu & rot arrays
@@ -192,8 +187,6 @@ proc run() {
     }
     cleanup();
   }
-
-
   
   var overallTimer = max reduce overallTimerLoc;
   flushWriteln("The first value of the corrMatrix is: ", corrMatrix[2,1]);
