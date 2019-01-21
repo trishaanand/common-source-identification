@@ -25,6 +25,7 @@ use utils;
 config const imagedir : string = "images";
 config const writeOutput : bool = false;
 config const numThreads : int = 8; 
+config const maxCache : int = 5;
 
 /* Given a file name this function calculates & returns the prnu data for that image */
 proc calculatePrnuComplex(h : int, w : int, image : [] RGB, prnuComplex : [] complex, ref data : prnu_data) {
@@ -84,6 +85,7 @@ proc run() {
   flushWriteln("  ", n, " images");
   flushWriteln("  ", numLocales, " locale(s)");
   flushWriteln("  ", numThreads, " numThreads");
+  flushWriteln("  ", maxCache, " maxCache");
 
   /* ************************* Start here ********************* */
   forall (i,j) in corrDomain {
@@ -93,7 +95,6 @@ proc run() {
     }
   }
 
-
   class ThreadData {
     var prnu, prnuRot, resultComplex : [imageDomain] complex;
     var i, j : int;
@@ -102,14 +103,12 @@ proc run() {
     var bwPlan : fftw_plan;
 
     proc deinit() {
-      flushWriteln("In the ThreadData deconstructor ");
       // prnuDestroy(data);
       destroy_plan(fwPlan);
       destroy_plan(fwPlanRot);
       destroy_plan(bwPlan);
     }
   }
-  startVdebug("vdata");
 
   coforall loc in Locales do on loc {
     // tagVdebug("Coforall Locales");
@@ -153,8 +152,18 @@ proc run() {
         threadArray[thread].bwPlan = plan_dft(threadArray[thread].resultComplex, threadArray[thread].resultComplex, FFTW_BACKWARD, FFTW_ESTIMATE);
       }
 
+      /* Create a cache for prnu & prnuRot 
+       * This is implemented via a arrays over the maxCache of images that are required
+       * in the correlation. After each calculation, we'll save the prnu & prnuRot in the cache. 
+       * If the max cap (arbitrary number) of the cache is reached, then don't save it. 
+       * This is to save on memory.
+       */
+      var cachePrnuIdx, cachePrnuRotIdx  : [{0..#maxCache}] int;
+      var cachePrnu : [{0..#maxCache}][imageDomain] complex;
+      var cachePrnuRot : [{0..#maxCache}][imageDomain] complex;
+      var cachePrnuSize, cachePrnuRotSize : atomic int;
+
       coforall thread in threadDomain {
-        // tagVdebug("Inside thread");
         // Start the thread timer
         threadTimer[thread].start();
         var prnuTemp : [imageDomainLoc] complex;
@@ -165,20 +174,38 @@ proc run() {
         for idx in localSubDom {
           var (i,j) = crossTuples(idx);
 
+          var flagI, flagJ : bool;
+          var flagIdx, flagJdx : int;
+
+          (flagI, flagIdx) = cachePrnuIdx.find(i);
+          (flagJ, flagJdx) = cachePrnuRotIdx.find(j);
+          if(flagI) {
+            // flushWriteln("On locale: ", here.id, " Read prnu from cache for i: ", i, " flagIdx: ", flagIdx);
+            threadArray[thread].prnu = cachePrnu[flagIdx];
+          }
+          if(flagJ) {
+            // flushWriteln("On locale: ", here.id , " Read prnuRot from cache for j: ", j , " flagJdx: ", flagJdx);
+            threadArray[thread].prnuRot = cachePrnuRot[flagJdx];
+          }
+
           //read both and compute
           var image, imageRot : [imageDomain] RGB;
-          readJPG(image, imageFileNames[i].localize());
-          readJPG(imageRot, imageFileNames[j].localize());
+          if (!flagI) then readJPG(image, imageFileNames[i].localize());
+          if (!flagJ) then readJPG(imageRot, imageFileNames[j].localize());
           // Start the thread timer
           // threadTimer[thread].start();
 
-          calculatePrnuComplex(h_loc, w_loc, image, threadArray[thread].prnu, data[thread]);
-          calculatePrnuComplex(h_loc, w_loc, imageRot, prnuTemp, data[thread]);
-          rotated180Prnu(h_loc, w_loc, prnuTemp, threadArray[thread].prnuRot);
-
-          // Calculate the FFT on the prnu & rot arrays
-          execute(threadArray[thread].fwPlan);
-          execute(threadArray[thread].fwPlanRot);
+          if (!flagI) {
+            calculatePrnuComplex(h_loc, w_loc, image, threadArray[thread].prnu, data[thread]);
+            //  Calculate the FFT on the prnu arrays
+            execute(threadArray[thread].fwPlan);
+          } 
+          if (!flagJ) {
+            calculatePrnuComplex(h_loc, w_loc, imageRot, prnuTemp, data[thread]);
+            rotated180Prnu(h_loc, w_loc, prnuTemp, threadArray[thread].prnuRot);
+            //  Calculate the FFT on rot arrays
+            execute(threadArray[thread].fwPlanRot);
+          }
 
           // Calculate the dot product
           threadArray[thread].resultComplex = threadArray[thread].prnu * threadArray[thread].prnuRot;
@@ -189,6 +216,29 @@ proc run() {
           corrMatrix(i,j) = computePCE(h_loc, w_loc, threadArray[thread].resultComplex);
           threadArray[thread].i = i;
           threadArray[thread].j = j;
+
+          // Write the values to cache so that we don't need to calculate it again
+          if (cachePrnuSize.read() < maxCache -1) {
+            var (found, val) = cachePrnuIdx.find(i);
+            // flushWriteln("On locale: ", here.id, " In the prnu cache, got found: ", found, " and val: ", val, " for i: ", i);
+            if (!found) {
+              cachePrnuIdx[cachePrnuSize.read()] = i;
+              cachePrnu[cachePrnuSize.read()] = threadArray[thread].prnu;
+              cachePrnuSize.add(1);
+              // flushWriteln("On locale: ", here.id, " Writing i: ", i, " cachePrnuSize: ", cachePrnuSize );
+            }
+          }
+          if (cachePrnuRotSize.read() < maxCache - 1) {
+            var (found, val) = cachePrnuRotIdx.find(j);
+            // flushWriteln("On locale: ", here.id, " In the prnuRot cache, got found: ", found, " and val: ", val, " for j: ", j);
+            if (!found) {
+              cachePrnuRotIdx[cachePrnuRotSize.read()] = j;
+              cachePrnuRot[cachePrnuRotSize.read()] = threadArray[thread].prnuRot;
+              cachePrnuRotSize.add(1);
+              // flushWriteln("On locale: ", here.id, " Writing j: ", j, " cachePrnuRotSize: ", cachePrnuRotSize);
+            }
+          }
+
           // threadTimer[thread].stop();
         }
         threadTimer[thread].stop();
@@ -203,7 +253,6 @@ proc run() {
       // cleanup();
     }
   }
-  stopVdebug();
 
   var overallTimer = max reduce overallTimerLoc;
   flushWriteln("The first value of the corrMatrix is: ", corrMatrix[2,1]);
