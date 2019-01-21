@@ -37,9 +37,6 @@ proc calculatePrnuComplex(h : int, w : int, image : [] RGB, prnuComplex : [] com
   prnuExecute(prnu, image, data);
 
   prnuComplex = prnu;
-  // forall (i,j) in imageDomain {
-  //   prnuComplex(i,j) = prnu(i,j) + 0i;
-  // }
 }
 
 proc rotated180Prnu(h : int, w : int, prnu : [] complex, prnuRot : [] complex) {
@@ -54,37 +51,7 @@ proc readImage(i: int, imageDomain:domain) {
   var image : [imageDomain]RGB;
 }
 
-proc tryRun() {
-  // var count: atomic int; // our counter
-  var lock$: sync bool;   // the mutex lock
-
-  // count.write(1);       // Only let two tasks in at a time.
-  lock$.writeXF(true);  // Set lock$ to full (unlocked)
-  // Note: The value doesnt actually matter, just the state
-  // (full:unlocked / empty:locked)
-  // Also, writeXF() fills (F) the sync var regardless of its state (X)
-
-  coforall task in 1..5 { // Generate tasks
-    // Create a barrier
-    // do {
-    lock$;                 // Read lock$ (wait)
-    // } while (count.read() < 0); // Keep waiting until a spot opens up
-
-    lock$.readFE(); 
-
-    // Actual 'work'
-    flushWriteln("Task #", task, " doing work.");
-    sleep(10);
-
-    // count.sub(1);          // decrement the counter
-    // count.add(1);        // Increment the counter
-    flushWriteln("Task #", task, " after sleep.");
-    lock$.writeXF(true); // Set lock$ to full (signal)
-  }
-}
-
 proc main() {
-  // tryRun();
   run();
 }
 
@@ -147,7 +114,6 @@ proc run() {
   coforall loc in Locales do on loc {
     // tagVdebug("Coforall Locales");
     var crossSubDomain = crossDomain.localSubdomain();
-    flushWriteln("Entered coforall on locale : ", here.id, ", with subdomain size : ", crossSubDomain.size);
     var localNumThreads = numThreads;
     if (crossSubDomain.size < localNumThreads) {
       localNumThreads = crossSubDomain.size;
@@ -192,7 +158,6 @@ proc run() {
         // Start the thread timer
         threadTimer[thread].start();
         var prnuTemp : [imageDomainLoc] complex;
-        var images : [2][imageDomainLoc] RGB;
 
         var localSubDom : domain(1) = {threadTuples(thread)[1]..threadTuples(thread)[2]};
         // threadTimer[thread].stop();
@@ -200,27 +165,21 @@ proc run() {
         for idx in localSubDom {
           var (i,j) = crossTuples(idx);
 
-          var flagI = if (i == threadArray[thread].i) then true else false;
-          var flagJ = if (j == threadArray[thread].j) then true else false;
-
           //read both and compute
-          on Locales[0] do {
-            if (!flagI) then readJPG(images[0], imageFileNames[i]);
-            if (!flagJ) then readJPG(images[1], imageFileNames[j]);
-          }
+          var image, imageRot : [imageDomain] RGB;
+          readJPG(image, imageFileNames[i].localize());
+          readJPG(imageRot, imageFileNames[j].localize());
           // Start the thread timer
           // threadTimer[thread].start();
 
-          if (!flagI) then calculatePrnuComplex(h_loc, w_loc, images[0], threadArray[thread].prnu, data[thread]);
-          if (!flagJ) {
-            calculatePrnuComplex(h_loc, w_loc, images[1], prnuTemp, data[thread]);
-            rotated180Prnu(h_loc, w_loc, prnuTemp, threadArray[thread].prnuRot);
-          }
+          calculatePrnuComplex(h_loc, w_loc, image, threadArray[thread].prnu, data[thread]);
+          calculatePrnuComplex(h_loc, w_loc, imageRot, prnuTemp, data[thread]);
+          rotated180Prnu(h_loc, w_loc, prnuTemp, threadArray[thread].prnuRot);
 
           // Calculate the FFT on the prnu & rot arrays
           execute(threadArray[thread].fwPlan);
           execute(threadArray[thread].fwPlanRot);
-          
+
           // Calculate the dot product
           threadArray[thread].resultComplex = threadArray[thread].prnu * threadArray[thread].prnuRot;
           
@@ -246,7 +205,6 @@ proc run() {
   }
   stopVdebug();
 
-  
   var overallTimer = max reduce overallTimerLoc;
   flushWriteln("The first value of the corrMatrix is: ", corrMatrix[2,1]);
   flushWriteln("Time: ", overallTimer, "s");

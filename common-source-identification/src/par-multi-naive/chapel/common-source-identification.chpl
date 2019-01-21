@@ -147,7 +147,7 @@ proc run() {
       var prnuTemp : [imageDomain] complex;
 
       var localSubDom : domain(1) = {threadTuples(thread)[1]..threadTuples(thread)[2]};
-      threadTimer[thread].stop();
+      // threadTimer[thread].stop();
       // Sequentially iterate over the localSubdom. MUST BE SEQUENTIAL because of FFT crap
       for idx in localSubDom {
         var (i,j) = crossTuples(idx);
@@ -158,7 +158,7 @@ proc run() {
         readJPG(imageRot, imageFileNames[j].localize());
 
         // Start the thread timer
-        threadTimer[thread].start();
+        // threadTimer[thread].start();
 
         calculatePrnuComplex(h, w, image, threadArray[thread].prnu, data[thread]);
         calculatePrnuComplex(h, w, imageRot, prnuTemp, data[thread]);
@@ -175,8 +175,9 @@ proc run() {
         execute(threadArray[thread].bwPlan);
 
         corrMatrix(i,j) = computePCE(h, w, threadArray[thread].resultComplex);
-        threadTimer[thread].stop();
+        // threadTimer[thread].stop();
       }
+      threadTimer[thread].stop();
       // Cleanup everything
       // delete threadArray[thread];
     }
