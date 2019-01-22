@@ -14,7 +14,7 @@ PROGNAME	= common-source-identification
 
 # The compiler and its flags.  We link to the jpeg, FFT, and math library
 CC		= chpl
-CFLAGS		= -ljpeg -lfftw3 -lm --fast
+CFLAGS		= -ljpeg -lfftw3 -lm --fast 
 
 # The runtime flags.  With this flag we set environment variables that help the
 # compiler to generate code for the right runtime.
@@ -45,4 +45,4 @@ cleanall: clean cleanslurm cleanoutput
 
 # Run the prnu
 run: 
-	./common-source-identification -nl 16 --maxCache 5 --writeOutput
+	./common-source-identification -nl 16 --maxCache 10 --writeOutput

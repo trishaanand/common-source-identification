@@ -110,7 +110,7 @@ proc run() {
 
   coforall loc in Locales do on loc {
     // Create a timer for each thread. We'll sum these timers to get the overall time
-    var threadTimer : [threadDomain] Timer;
+    var LocaleTimer : Timer;
     var crossSubDomain = crossDomain.localSubdomain();
     var threadArray : [threadDomain] ThreadData;
     var data : [threadDomain] prnu_data;
@@ -140,9 +140,10 @@ proc run() {
       threadArray[thread].bwPlan = plan_dft(threadArray[thread].resultComplex, threadArray[thread].resultComplex, FFTW_BACKWARD, FFTW_ESTIMATE);
     }
 
-    coforall thread in threadDomain {
       // Start the thread timer
-      threadTimer[thread].start();
+    LocaleTimer.start();
+    coforall thread in threadDomain {
+      // threadTimer[thread].start();
 
       var prnuTemp : [imageDomain] complex;
 
@@ -177,11 +178,12 @@ proc run() {
         corrMatrix(i,j) = computePCE(h, w, threadArray[thread].resultComplex);
         // threadTimer[thread].stop();
       }
-      threadTimer[thread].stop();
+      // threadTimer[thread].stop();
       // Cleanup everything
       // delete threadArray[thread];
     }
-    overallTimerLoc[loc.id] = max reduce threadTimer.elapsed();
+    LocaleTimer.stop();
+    overallTimerLoc[loc.id] = LocaleTimer.elapsed();
 
     for thread in threadDomain {
       delete threadArray[thread];
