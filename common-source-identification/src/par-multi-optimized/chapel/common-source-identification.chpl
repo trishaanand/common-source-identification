@@ -25,18 +25,15 @@ use utils;
 config const imagedir : string = "images";
 config const writeOutput : bool = false;
 config const numThreads : int = 8; 
-config const maxCache : int = 5;
+config const maxCache : int = 10;
 
 /* Given a file name this function calculates & returns the prnu data for that image */
 proc calculatePrnuComplex(h : int, w : int, image : [] RGB, prnuComplex : [] complex, ref data : prnu_data) {
   
   /* Create a domain for an image and allocate the image itself */
   var imageDomain: domain(2) = {0..#h, 0..#w};
-
   var prnu : [imageDomain] real;
-  
   prnuExecute(prnu, image, data);
-
   prnuComplex = prnu;
 }
 
@@ -45,11 +42,7 @@ proc rotated180Prnu(h : int, w : int, prnu : [] complex, prnuRot : [] complex) {
 
   /* Rotate the matrix 180 degrees */
   forall (i,j) in imageDomain do 
-    prnuRot(i,j) = prnu(h-i-1, w-j-1);
-}
-
-proc readImage(i: int, imageDomain:domain) {
-  var image : [imageDomain]RGB;
+    prnuRot(h-i-1, w-j-1) = prnu(i,j);
 }
 
 proc main() {
@@ -98,7 +91,6 @@ proc run() {
 
   class ThreadData {
     var prnu, prnuRot, resultComplex : [imageDomain] complex;
-    var i, j : int;
     var fwPlan : fftw_plan;
     var fwPlanRot : fftw_plan;
     var bwPlan : fftw_plan;
@@ -112,7 +104,6 @@ proc run() {
   }
 
   coforall loc in Locales do on loc {
-    // tagVdebug("Coforall Locales");
     var crossSubDomain = crossDomain.localSubdomain();
     var localNumThreads = numThreads;
     if (crossSubDomain.size < localNumThreads) {
@@ -135,8 +126,9 @@ proc run() {
       var threadTuples : [threadDomain] 2*int;
       high = crossSubDomain.low - 1; 
 
-      // Calculate the indices of the the corrMatrix that each thread will compute over
-      // IMP: Must be sequential else it throws a segmentation fault
+      /* Calculate the indices of the the corrMatrix that each thread will compute over
+       * IMP: Must be sequential else it throws a segmentation fault
+       */
       for thread in threadDomain {
         var low = high + 1; 
         var num = defaultNum;
@@ -163,16 +155,16 @@ proc run() {
       var cachePrnu : [{0..#maxCache}][imageDomain] complex;
       var cachePrnuRot : [{0..#maxCache}][imageDomain] complex;
       var cachePrnuSize, cachePrnuRotSize : atomic int;
-      var counterPrnu, counterPrnuRot : atomic int;
+      
+      // Start the timer for this locale
       localeTimer.start();
+      
       coforall thread in threadDomain {
-        // Start the thread timer
-        // threadTimer[thread].start();
-        var prnuTemp : [imageDomainLoc] complex;
-
         var localSubDom : domain(1) = {threadTuples(thread)[1]..threadTuples(thread)[2]};
-        // threadTimer[thread].stop();
-        // Sequentially iterate over the localSubdom. MUST BE SEQUENTIAL because of FFT crap
+        
+        /* Sequentially iterate over the localSubdom. MUST BE SEQUENTIAL because of how FFT plans works.  
+         * FFTs should be calculated on the same thread as the plan
+         */
         for idx in localSubDom {
           var (i,j) = crossTuples(idx);
 
@@ -183,24 +175,17 @@ proc run() {
           (flagI, flagIdx) = cachePrnuIdx.find(i);
           (flagJ, flagJdx) = cachePrnuRotIdx.find(j);
 
-          //Check for cache hit
-          if(flagI) {
-            // flushWriteln("On locale: ", here.id, " Read prnu from cache for i: ", i, " flagIdx: ", flagIdx);
-            threadArray[thread].prnu = cachePrnu[flagIdx];
-            counterPrnu.add(1);
-          } else {
+          /* If the prnu value is not found in cache, then calculate it */
+          if(!flagI) {
             readJPG(image, imageFileNames[i].localize());
             calculatePrnuComplex(h_loc, w_loc, image, threadArray[thread].prnu, data[thread]);
             //  Calculate the FFT on the prnu arrays
             execute(threadArray[thread].fwPlan);
           }
-          
-          //Check for cache hit
-          if(flagJ) {
-            // flushWriteln("On locale: ", here.id , " Read prnuRot from cache for j: ", j , " flagJdx: ", flagJdx);
-            threadArray[thread].prnuRot = cachePrnuRot[flagJdx];
-            counterPrnuRot.add(1);
-          } else {
+
+          /* If the prnuRot value is not found in cache, then calculate it */
+          if(!flagJ) {
+            var prnuTemp : [imageDomainLoc] complex;
             readJPG(imageRot, imageFileNames[j].localize());
             calculatePrnuComplex(h_loc, w_loc, imageRot, prnuTemp, data[thread]);
             rotated180Prnu(h_loc, w_loc, prnuTemp, threadArray[thread].prnuRot);
@@ -208,51 +193,43 @@ proc run() {
             execute(threadArray[thread].fwPlanRot);
           }
 
+          /* We use pointers to the prnu & prnuRot array values so that we don't have to copy the actual 
+           * values over from cache to the threadArray class object.
+           */
+          ref prnuRef = if (flagI) then cachePrnu[flagIdx] else threadArray[thread].prnu;
+          ref prnuRotRef = if (flagJ) then cachePrnuRot[flagJdx] else threadArray[thread].prnuRot;
+
           // Calculate the dot product
-          threadArray[thread].resultComplex = threadArray[thread].prnu * threadArray[thread].prnuRot;
+          forall (x,y) in imageDomainLoc {
+            threadArray[thread].resultComplex(x,y) = prnuRef(x,y) * prnuRotRef(x,y);
+          }
           
           // Inverse FFT
           execute(threadArray[thread].bwPlan);
 
-          corrMatrix(i,j) = computePCE(h_loc, w_loc, threadArray[thread].resultComplex);
-          threadArray[thread].i = i;
-          threadArray[thread].j = j;
+          computePCE(h_loc, w_loc, threadArray[thread].resultComplex, corrMatrix(i,j));
 
           // Write the values to cache so that we don't need to calculate it again
           if (cachePrnuSize.read() < (maxCache - 1)) {
             var (found, val) = cachePrnuIdx.find(i);
-            // flushWriteln("On locale: ", here.id, " In the prnu cache, got found: ", found, " and val: ", val, " for i: ", i);
             if (!found) {
               cachePrnuIdx[cachePrnuSize.read()] = i;
-              cachePrnu[cachePrnuSize.read()] = threadArray[thread].prnu;
+              cachePrnu[cachePrnuSize.read()] = prnuRef;
               cachePrnuSize.add(1);
-              // flushWriteln("On locale: ", here.id, " Writing i: ", i, " cachePrnuSize: ", cachePrnuSize );
             }
           }
           if (cachePrnuRotSize.read() < (maxCache - 1)) {
             var (found, val) = cachePrnuRotIdx.find(j);
-            // flushWriteln("On locale: ", here.id, " In the prnuRot cache, got found: ", found, " and val: ", val, " for j: ", j);
             if (!found) {
               cachePrnuRotIdx[cachePrnuRotSize.read()] = j;
-              cachePrnuRot[cachePrnuRotSize.read()] = threadArray[thread].prnuRot;
+              cachePrnuRot[cachePrnuRotSize.read()] = prnuRotRef;
               cachePrnuRotSize.add(1);
-              // flushWriteln("On locale: ", here.id, " Writing j: ", j, " cachePrnuRotSize: ", cachePrnuRotSize);
             }
           }
-          // threadTimer[thread].stop();
         }
-        // threadTimer[thread].stop();
-        // Cleanup everything
-        // delete threadArray[thread];
       }
       localeTimer.stop();
       overallTimerLoc[loc.id] = localeTimer.elapsed();
-      flushWriteln("On locale: ", here.id, " cachePrnuSize: ", cachePrnuSize, ", cache hits : ", counterPrnu );
-      flushWriteln("On locale: ", here.id, " cachePrnuRotSize: ", cachePrnuRotSize, ", cache hits : ", counterPrnuRot );
-      // for thread in threadDomain {
-      //   delete threadArray[thread];
-      // }
-      // cleanup();
     }
   }
 

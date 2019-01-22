@@ -1,17 +1,6 @@
 use FFTW;
 use Time;
 
-class PlusReduceOp: ReduceScanOp {
-  type eltType;
-  var  value: eltType;
-  proc identity         return 0: eltType;
-  proc accumulate(elm)  { value = value + elm; }
-  proc accumulateOntoState(ref state, elm) { state = state + elm; }
-  proc combine(other)   { value = value + other.value; }
-  proc generate()       return value;
-  proc clone()          return new unmanaged PlusReduceOp(eltType=eltType);
-}
-
 proc getMax(result : [] real, h : int, w : int) {
     const imageDomain: domain(2) = {0..#h, 0..#w};
     var lowI, highI, lowJ, highJ : int;
@@ -27,19 +16,25 @@ proc getMax(result : [] real, h : int, w : int) {
     return (max, lowI, highI, lowJ, highJ);
 }
 
-proc computePCE(h : int, w : int, resultComplex : [] complex) {
+proc computePCE(h : int, w : int, resultComplex : [] complex, ref pce : real) {
     const imageDomain: domain(2) = {0..#h, 0..#w};
     
-    var result : [imageDomain] real = (resultComplex.re * resultComplex.re) / ((h*w) * (h*w));
+    var result : [imageDomain] real;
+    forall (i,j) in imageDomain {
+        result(i,j) = (resultComplex(i,j).re * resultComplex(i,j).re) / ((h*w) * (h*w));
+    }
     
     var (max, lowI, highI, lowJ, highJ) = getMax(result, h, w);
-    var sum = + reduce result;
+    var sum, ignoreSum : real;
+    forall (i,j) in imageDomain with (+ reduce sum) {
+        sum += result(i,j);
+    }
     
     var innerDomain : subdomain(imageDomain) = {lowI..highI-1, lowJ..highJ-1};
-    var ignoreSum = + reduce result[innerDomain];
     
-    sum = sum - ignoreSum;
-
-    var PCE = max * ((h*w) - 121) / sum;
-    return PCE;
+    forall (i,j) in innerDomain with (+ reduce ignoreSum) {
+        ignoreSum += result(i,j);
+    }
+    
+    pce = max * ((h*w) - 121) / (sum - ignoreSum);
 }
