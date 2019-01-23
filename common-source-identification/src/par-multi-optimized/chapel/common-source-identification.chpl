@@ -7,7 +7,11 @@ use FileSystem;
 /* Time the execution. */
 use Time;
 
+/* For Block distribution of data over locales */
 use BlockDist;
+
+/* For FFT calculations */
+use FFTW;
 
 /* Read in JPG images. */
 use read_jpg;
@@ -16,7 +20,7 @@ use read_jpg;
 use prnu;
 
 /* user defined modules */
-use fft;
+use pce;
 use utils;
 
 /* Configuration parameters */
@@ -41,6 +45,9 @@ proc rotatePrnuBy180(h : int, w : int, prnu : [] complex, prnuRot : [] complex) 
     prnuRot(h-i-1, w-j-1) = prnu(i,j);
 }
 
+/* Write a value to cache if not already present. Used to cache Prnu & PrnuRot values
+ * Presence of a value is determined by cacheIdx that stores that image index of cached values
+ */
 proc writeCache(cacheSize : atomic int, i : int, ref cacheIdx : [] int, ref cache, ref val : [] complex) {
     if (cacheSize.read() < (maxCache - 1)) {
     var (found, idxVal) = cacheIdx.find(i);
@@ -72,7 +79,6 @@ proc run() {
   /* Create a domain for the correlation matrix. */
   const corrDomain : domain(2) = {1..n, 1..n};
   const imageDomain : domain(2) = {0..#h, 0..#w};
-  const numDomain : domain(1) = {1..n};
 
   var corrMatrix : [corrDomain] real;
   var nrCorrelations = (n * (n - 1)) / 2;
@@ -89,24 +95,35 @@ proc run() {
   writeln("  ", maxCache, " maxCache");
 
   /* ************************* Start here ********************* */
-  forall (i,j) in corrDomain {
-    if (i > j) {
-        var idx = (((i-1) * (i - 1 -1)) / 2 ) + (j - 1);
-        crossTuples(idx) = (i,j);
-    }
-  }
-
+  
+  /* This class holds the data required for computation on each thread */
   class ThreadData {
     var prnu, prnuRot, resultComplex : [imageDomain] complex;
     var fwPlan : fftw_plan;
     var fwPlanRot : fftw_plan;
     var bwPlan : fftw_plan;
 
+    proc init(h_loc : int, w_loc : int, id : int, ref data : prnu_data) {
+      prnuInit(h_loc, w_loc, data);
+      
+      fwPlan = plan_dft(prnu, prnu, FFTW_FORWARD, FFTW_ESTIMATE);
+      fwPlanRot = plan_dft(prnuRot, prnuRot, FFTW_FORWARD, FFTW_ESTIMATE);
+      bwPlan = plan_dft(resultComplex, resultComplex, FFTW_BACKWARD, FFTW_ESTIMATE);
+    }
+
     proc deinit() {
       // prnuDestroy(data);
       destroy_plan(fwPlan);
       destroy_plan(fwPlanRot);
       destroy_plan(bwPlan);
+    }
+  }
+
+  /* Create a map b/w the correlation and the images required to compute it */
+  forall (i,j) in corrDomain {
+    if (i > j) {
+        var idx = (((i-1) * (i - 1 -1)) / 2 ) + (j - 1);
+        crossTuples(idx) = (i,j);
     }
   }
 
@@ -128,22 +145,29 @@ proc run() {
       // This is the number of correlations that must be performed by each thread
       var threadDomain : domain(1) = {0..#localNumThreads};
 
-      var threadArray : [threadDomain] ThreadData;
-      var data : [threadDomain] prnu_data;
+      /* Create a local domain for image in each locale. This ensures that we don't copy h & w from locale[0] 
+       * each time we require it for computation.
+       */ 
       var h_loc, w_loc : int;
       h_loc = h;
       w_loc = w;
       var imageDomainLoc : domain(2) = {0..#h_loc, 0..#w_loc};
 
       /* Calculate the indices of the the corrMatrix that each thread will compute over
-       * IMP: Must be sequential else it throws a segmentation fault
+       * We attempt to distribute the computations evenly over all the threads. 
+       * Any remaining computations are then distributed sequentially to threads to achieve optimal
+       * computation distribution.
        */
       var defaultNum = crossSubDomain.size/localNumThreads : int;
       var rem = crossSubDomain.size % localNumThreads;
       var high : int;
+      /*  This stores the low & high values of nrCorrlations that the thread must compute */
       var threadTuples : [threadDomain] 2*int;
       high = crossSubDomain.low - 1; 
 
+      var threadArray : [threadDomain] ThreadData;
+      var data : [threadDomain] prnu_data;
+      // IMP: Must be sequential else it throws a segmentation fault
       for thread in threadDomain {
         var low = high + 1; 
         var num = defaultNum;
@@ -152,12 +176,8 @@ proc run() {
         }
         high = low + num -1;
         threadTuples(thread) = (low, high);
-        // Init all the data
-        prnuInit(h_loc, w_loc, data[thread]);
-        threadArray[thread] = new unmanaged ThreadData();
-        threadArray[thread].fwPlan = plan_dft(threadArray[thread].prnu, threadArray[thread].prnu, FFTW_FORWARD, FFTW_ESTIMATE);
-        threadArray[thread].fwPlanRot = plan_dft(threadArray[thread].prnuRot, threadArray[thread].prnuRot, FFTW_FORWARD, FFTW_ESTIMATE);
-        threadArray[thread].bwPlan = plan_dft(threadArray[thread].resultComplex, threadArray[thread].resultComplex, FFTW_BACKWARD, FFTW_ESTIMATE);
+        // Create unmanaged objects for each thread. Data is initialized in the init fxn of the class.
+        threadArray[thread] = new unmanaged ThreadData(h_loc, w_loc, thread, data[thread]);
       }
 
       /* Create a cache for prnu & prnuRot 
@@ -182,51 +202,19 @@ proc run() {
          */
         for idx in localSubDom {
           var (i,j) = crossTuples(idx);
-
-          var flagI, flagJ : bool;
-          var flagIdx, flagJdx : int;
-          var image, imageRot : [imageDomain] RGB;
-
-          (flagI, flagIdx) = cachePrnuIdx.find(i);
-          (flagJ, flagJdx) = cachePrnuRotIdx.find(j);
-
-          /* If the prnu value is not found in cache, then calculate it */
-          if(!flagI) {
-            readJPG(image, imageFileNames[i].localize());
-            calculatePrnu(imageDomainLoc, image, threadArray[thread].prnu, data[thread]);
-            //  Calculate the FFT on the prnu arrays
-            execute(threadArray[thread].fwPlan);
-          }
-
-          /* If the prnuRot value is not found in cache, then calculate it */
-          if(!flagJ) {
-            var prnuTemp : [imageDomainLoc] complex;
-            readJPG(imageRot, imageFileNames[j].localize());
-            calculatePrnu(imageDomainLoc, imageRot, prnuTemp, data[thread]);
-            rotatePrnuBy180(h_loc, w_loc, prnuTemp, threadArray[thread].prnuRot);
-            //  Calculate the FFT on rot arrays
-            execute(threadArray[thread].fwPlanRot);
-          }
-
-          /* We use pointers to the prnu & prnuRot array values so that we don't have to copy the actual 
-           * values over from cache to the threadArray class object.
-           */
-          ref prnuRef = if (flagI) then cachePrnu[flagIdx] else threadArray[thread].prnu;
-          ref prnuRotRef = if (flagJ) then cachePrnuRot[flagJdx] else threadArray[thread].prnuRot;
-
-          // Calculate the dot product
-          forall (x,y) in imageDomainLoc {
-            threadArray[thread].resultComplex(x,y) = prnuRef(x,y) * prnuRotRef(x,y);
-          }
-          
-          // Inverse FFT
-          execute(threadArray[thread].bwPlan);
-
-          computePCE(h_loc, w_loc, threadArray[thread].resultComplex, corrMatrix(i,j));
-
-          // Write the values to cache so that we don't need to calculate it again
-          writeCache(cachePrnuSize, i, cachePrnuIdx, cachePrnu, prnuRef);
-          writeCache(cachePrnuRotSize, j, cachePrnuRotIdx, cachePrnuRot, prnuRotRef);
+          computeOnThread(h_loc, w_loc, crossTuples(idx), 
+                          cachePrnuIdx, 
+                          cachePrnuRotIdx, 
+                          cachePrnuSize,
+                          cachePrnuRotSize,
+                          cachePrnu,
+                          cachePrnuRot,
+                          imageDomainLoc,
+                          imageFileNames[i],
+                          imageFileNames[j],
+                          threadArray[thread],
+                          data[thread],
+                          corrMatrix(i,j));
         }
       }
       localeTimer.stop();
@@ -244,4 +232,63 @@ proc run() {
     writeln("Writing output files...");
     write2DRealArray(corrMatrix, "corrMatrix");
   }
+}
+
+proc computeOnThread(h_loc : int, w_loc : int, (i,j) : 2*int, 
+                      ref cachePrnuIdx : [] int, 
+                      ref cachePrnuRotIdx : [] int, 
+                      cachePrnuSize : atomic int, 
+                      cachePrnuRotSize : atomic int,
+                      ref cachePrnu, 
+                      ref cachePrnuRot,
+                      imageDomain : domain, 
+                      imageFileName : string, imageFileNameRot : string,
+                      ref threadData,
+                      ref data : prnu_data, 
+                      ref pce : real) {
+
+    var flagI, flagJ : bool;
+    var flagIdx, flagJdx : int;
+    var image, imageRot : [imageDomain] RGB;
+
+    (flagI, flagIdx) = cachePrnuIdx.find(i);
+    (flagJ, flagJdx) = cachePrnuRotIdx.find(j);
+
+    /* If the prnu value is not found in cache, then calculate it */
+    if(!flagI) {
+      readJPG(image, imageFileName.localize());
+      calculatePrnu(imageDomain, image, threadData.prnu, data);
+      //  Calculate the FFT on the prnu arrays
+      execute(threadData.fwPlan);
+    }
+
+    /* If the prnuRot value is not found in cache, then calculate it */
+    if(!flagJ) {
+      var prnuTemp : [imageDomain] complex;
+      readJPG(imageRot, imageFileNameRot.localize());
+      calculatePrnu(imageDomain, imageRot, prnuTemp, data);
+      rotatePrnuBy180(h_loc, w_loc, prnuTemp, threadData.prnuRot);
+      //  Calculate the FFT on rot arrays
+      execute(threadData.fwPlanRot);
+    }
+
+    /* We use pointers to the prnu & prnuRot array values so that we don't have to copy the actual 
+     * values over from cache to the threadArray class object.
+     */
+    ref prnuRef = if (flagI) then cachePrnu[flagIdx] else threadData.prnu;
+    ref prnuRotRef = if (flagJ) then cachePrnuRot[flagJdx] else threadData.prnuRot;
+
+    // Calculate the dot product
+    forall (x,y) in imageDomain {
+      threadData.resultComplex(x,y) = prnuRef(x,y) * prnuRotRef(x,y);
+    }
+    
+    // Inverse FFT
+    execute(threadData.bwPlan);
+
+    computePCE(h_loc, w_loc, threadData.resultComplex, pce);
+
+    // Write the values to cache so that we don't need to calculate it again
+    writeCache(cachePrnuSize, i, cachePrnuIdx, cachePrnu, prnuRef);
+    writeCache(cachePrnuRotSize, j, cachePrnuRotIdx, cachePrnuRot, prnuRotRef);
 }

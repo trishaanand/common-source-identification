@@ -1,6 +1,3 @@
-use FFTW;
-use Time;
-
 proc getMax(result : [] real, h : int, w : int) {
     const imageDomain: domain(2) = {0..#h, 0..#w};
     var lowI, highI, lowJ, highJ : int;
