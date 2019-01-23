@@ -9,15 +9,13 @@ use Time;
 
 use BlockDist;
 
-use VisualDebug;
-
 /* Read in JPG images. */
 use read_jpg;
 
 /* Compute PRNU noise patterns. */
 use prnu;
 
-/* user defined functions */
+/* user defined modules */
 use fft;
 use utils;
 
@@ -28,21 +26,30 @@ config const numThreads : int = 8;
 config const maxCache : int = 10;
 
 /* Given a file name this function calculates & returns the prnu data for that image */
-proc calculatePrnuComplex(h : int, w : int, image : [] RGB, prnuComplex : [] complex, ref data : prnu_data) {
+proc calculatePrnu(imageDomain : domain, image : [] RGB, prnuComplex : [] complex, ref data : prnu_data) {
   
-  /* Create a domain for an image and allocate the image itself */
-  var imageDomain: domain(2) = {0..#h, 0..#w};
   var prnu : [imageDomain] real;
   prnuExecute(prnu, image, data);
   prnuComplex = prnu;
 }
 
-proc rotated180Prnu(h : int, w : int, prnu : [] complex, prnuRot : [] complex) {
+/* Rotate the matrix 180 degrees */
+proc rotatePrnuBy180(h : int, w : int, prnu : [] complex, prnuRot : [] complex) {
   const imageDomain: domain(2) = {0..#h, 0..#w};
 
-  /* Rotate the matrix 180 degrees */
   forall (i,j) in imageDomain do 
     prnuRot(h-i-1, w-j-1) = prnu(i,j);
+}
+
+proc writeCache(cacheSize : atomic int, i : int, ref cacheIdx : [] int, ref cache, ref val : [] complex) {
+    if (cacheSize.read() < (maxCache - 1)) {
+    var (found, idxVal) = cacheIdx.find(i);
+    if (!found) {
+      cacheIdx[cacheSize.read()] = i;
+      cache[cacheSize.read()] = val;
+      cacheSize.add(1);
+    }
+  }
 }
 
 proc main() {
@@ -75,11 +82,11 @@ proc run() {
   const localeDomain = {0..#numLocales} dmapped Block ({0..#numLocales});
   var overallTimerLoc : [localeDomain] real;
 
-  flushWriteln("Running Common Source Identification...");
-  flushWriteln("  ", n, " images");
-  flushWriteln("  ", numLocales, " locale(s)");
-  flushWriteln("  ", numThreads, " numThreads");
-  flushWriteln("  ", maxCache, " maxCache");
+  writeln("Running Common Source Identification...");
+  writeln("  ", n, " images");
+  writeln("  ", numLocales, " locale(s)");
+  writeln("  ", numThreads, " numThreads");
+  writeln("  ", maxCache, " maxCache");
 
   /* ************************* Start here ********************* */
   forall (i,j) in corrDomain {
@@ -104,31 +111,39 @@ proc run() {
   }
 
   coforall loc in Locales do on loc {
+    var localeTimer : Timer;
+
+    /* localNumThreads determines the number of threads on each locale. 
+     * If localNumThreads == 0, that means there are no threads required to be spawned on that locale. 
+     * Required if we have more threads than number of correlations to compute.
+     */    
     var crossSubDomain = crossDomain.localSubdomain();
     var localNumThreads = numThreads;
     if (crossSubDomain.size < localNumThreads) {
       localNumThreads = crossSubDomain.size;
     }
-    var localeTimer : Timer;
+    
     if (localNumThreads != 0) {
+
       // This is the number of correlations that must be performed by each thread
       var threadDomain : domain(1) = {0..#localNumThreads};
-      // Create a timer for each thread. We'll sum these timers to get the overall time
+
       var threadArray : [threadDomain] ThreadData;
       var data : [threadDomain] prnu_data;
       var h_loc, w_loc : int;
       h_loc = h;
       w_loc = w;
       var imageDomainLoc : domain(2) = {0..#h_loc, 0..#w_loc};
+
+      /* Calculate the indices of the the corrMatrix that each thread will compute over
+       * IMP: Must be sequential else it throws a segmentation fault
+       */
       var defaultNum = crossSubDomain.size/localNumThreads : int;
       var rem = crossSubDomain.size % localNumThreads;
       var high : int;
       var threadTuples : [threadDomain] 2*int;
       high = crossSubDomain.low - 1; 
 
-      /* Calculate the indices of the the corrMatrix that each thread will compute over
-       * IMP: Must be sequential else it throws a segmentation fault
-       */
       for thread in threadDomain {
         var low = high + 1; 
         var num = defaultNum;
@@ -178,7 +193,7 @@ proc run() {
           /* If the prnu value is not found in cache, then calculate it */
           if(!flagI) {
             readJPG(image, imageFileNames[i].localize());
-            calculatePrnuComplex(h_loc, w_loc, image, threadArray[thread].prnu, data[thread]);
+            calculatePrnu(imageDomainLoc, image, threadArray[thread].prnu, data[thread]);
             //  Calculate the FFT on the prnu arrays
             execute(threadArray[thread].fwPlan);
           }
@@ -187,8 +202,8 @@ proc run() {
           if(!flagJ) {
             var prnuTemp : [imageDomainLoc] complex;
             readJPG(imageRot, imageFileNames[j].localize());
-            calculatePrnuComplex(h_loc, w_loc, imageRot, prnuTemp, data[thread]);
-            rotated180Prnu(h_loc, w_loc, prnuTemp, threadArray[thread].prnuRot);
+            calculatePrnu(imageDomainLoc, imageRot, prnuTemp, data[thread]);
+            rotatePrnuBy180(h_loc, w_loc, prnuTemp, threadArray[thread].prnuRot);
             //  Calculate the FFT on rot arrays
             execute(threadArray[thread].fwPlanRot);
           }
@@ -210,22 +225,8 @@ proc run() {
           computePCE(h_loc, w_loc, threadArray[thread].resultComplex, corrMatrix(i,j));
 
           // Write the values to cache so that we don't need to calculate it again
-          if (cachePrnuSize.read() < (maxCache - 1)) {
-            var (found, val) = cachePrnuIdx.find(i);
-            if (!found) {
-              cachePrnuIdx[cachePrnuSize.read()] = i;
-              cachePrnu[cachePrnuSize.read()] = prnuRef;
-              cachePrnuSize.add(1);
-            }
-          }
-          if (cachePrnuRotSize.read() < (maxCache - 1)) {
-            var (found, val) = cachePrnuRotIdx.find(j);
-            if (!found) {
-              cachePrnuRotIdx[cachePrnuRotSize.read()] = j;
-              cachePrnuRot[cachePrnuRotSize.read()] = prnuRotRef;
-              cachePrnuRotSize.add(1);
-            }
-          }
+          writeCache(cachePrnuSize, i, cachePrnuIdx, cachePrnu, prnuRef);
+          writeCache(cachePrnuRotSize, j, cachePrnuRotIdx, cachePrnuRot, prnuRotRef);
         }
       }
       localeTimer.stop();
@@ -234,15 +235,13 @@ proc run() {
   }
 
   var overallTimer = max reduce overallTimerLoc;
-  flushWriteln("The first value of the corrMatrix is: ", corrMatrix[2,1]);
-  flushWriteln("Time: ", overallTimer, "s");
+  writeln("The first value of the corrMatrix is: ", corrMatrix[2,1]);
+  writeln("Time: ", overallTimer, "s");
 
-  flushWriteln("Throughput: ", nrCorrelations / overallTimer, " corrs/s");
+  writeln("Throughput: ", nrCorrelations / overallTimer, " corrs/s");
 
   if (writeOutput) {
-    flushWriteln("Writing output files...");
+    writeln("Writing output files...");
     write2DRealArray(corrMatrix, "corrMatrix");
   }
-
-  flushWriteln("End");
 }
