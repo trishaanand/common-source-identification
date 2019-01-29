@@ -45,4 +45,4 @@ cleanall: clean cleanslurm cleanoutput
 
 # Run the prnu
 run: 
-	./common-source-identification -nl 16 --maxCache 10 --writeOutput
+	./common-source-identification -nl 16 --maxCache 10 --numThreads 8 --writeOutput

@@ -48,13 +48,17 @@ proc rotatePrnuBy180(h : int, w : int, prnu : [] complex, prnuRot : [] complex) 
 /* Write a value to cache if not already present. Used to cache Prnu & PrnuRot values
  * Presence of a value is determined by cacheIdx that stores that image index of cached values
  */
-proc writeCache(cacheSize : atomic int, i : int, ref cacheIdx : [] int, ref cache, ref val : [] complex) {
+proc writeCache(cacheSize : atomic int, i : int, ref cacheIdx : [] int, ref cache, ref val : [] complex, lock : atomic bool) {
     if (cacheSize.read() < (maxCache - 1)) {
     var (found, idxVal) = cacheIdx.find(i);
     if (!found) {
-      cacheIdx[cacheSize.read()] = i;
+      while lock.testAndSet() do chpl_task_yield();
+      
       cache[cacheSize.read()] = val;
+      cacheIdx[cacheSize.read()] = i;
       cacheSize.add(1);
+    
+      lock.clear();
     }
   }
 }
@@ -167,6 +171,7 @@ proc run() {
 
       var threadArray : [threadDomain] ThreadData;
       var data : [threadDomain] prnu_data;
+
       // IMP: Must be sequential else it throws a segmentation fault
       for thread in threadDomain {
         var low = high + 1; 
@@ -190,7 +195,8 @@ proc run() {
       var cachePrnu : [{0..#maxCache}][imageDomain] complex;
       var cachePrnuRot : [{0..#maxCache}][imageDomain] complex;
       var cachePrnuSize, cachePrnuRotSize : atomic int;
-      
+      var cachePrnuLock, cachePrnuRotLock : atomic bool;
+
       // Start the timer for this locale
       localeTimer.start();
       
@@ -209,6 +215,8 @@ proc run() {
                           cachePrnuRotSize,
                           cachePrnu,
                           cachePrnuRot,
+                          cachePrnuLock,
+                          cachePrnuRotLock,
                           imageDomainLoc,
                           imageFileNames[i],
                           imageFileNames[j],
@@ -217,6 +225,7 @@ proc run() {
                           corrMatrix(i,j));
         }
       }
+      // Stopping the timer for the locale and storing elapsed time in an array
       localeTimer.stop();
       overallTimerLoc[loc.id] = localeTimer.elapsed();
     }
@@ -241,6 +250,8 @@ proc computeOnThread(h_loc : int, w_loc : int, (i,j) : 2*int,
                       cachePrnuRotSize : atomic int,
                       ref cachePrnu, 
                       ref cachePrnuRot,
+                      cachePrnuLock : atomic bool,
+                      cachePrnuRotLock : atomic bool,
                       imageDomain : domain, 
                       imageFileName : string, imageFileNameRot : string,
                       ref threadData,
@@ -289,6 +300,6 @@ proc computeOnThread(h_loc : int, w_loc : int, (i,j) : 2*int,
     computePCE(h_loc, w_loc, threadData.resultComplex, pce);
 
     // Write the values to cache so that we don't need to calculate it again
-    writeCache(cachePrnuSize, i, cachePrnuIdx, cachePrnu, prnuRef);
-    writeCache(cachePrnuRotSize, j, cachePrnuRotIdx, cachePrnuRot, prnuRotRef);
+    writeCache(cachePrnuSize, i, cachePrnuIdx, cachePrnu, prnuRef, cachePrnuLock);
+    writeCache(cachePrnuRotSize, j, cachePrnuRotIdx, cachePrnuRot, prnuRotRef, cachePrnuRotLock);
 }
