@@ -10,6 +10,9 @@ use Time;
 /* For ceiling function */
 use Math;
 
+/* FFT Module */
+use FFTW_MT;
+
 /* Read in JPG images. */
 use read_jpg;
 

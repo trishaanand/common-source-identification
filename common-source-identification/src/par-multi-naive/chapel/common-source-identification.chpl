@@ -9,6 +9,9 @@ use Time;
 
 use BlockDist;
 
+/* FFT Module */
+use FFTW_MT;
+
 /* Read in JPG images. */
 use read_jpg;
 
@@ -16,7 +19,7 @@ use read_jpg;
 use prnu;
 
 /* user defined functions */
-use fft;
+use pce;
 use utils;
 
 /* Configuration parameters */
@@ -39,16 +42,12 @@ proc calculatePrnuComplex(h : int, w : int, image : [] RGB, prnuComplex : [] com
   }
 }
 
+/* Rotate the prnu matrix by 180 degrees */
 proc rotated180Prnu(h : int, w : int, prnu : [] complex, prnuRot : [] complex) {
   const imageDomain: domain(2) = {0..#h, 0..#w};
 
-  /* Rotate the matrix 180 degrees */
   forall (i,j) in imageDomain do 
     prnuRot(i,j) = prnu(h-i-1, w-j-1);
-}
-
-proc readImage(i: int, imageDomain:domain) {
-  var image : [imageDomain]RGB;
 }
 
 proc main() {
@@ -71,7 +70,6 @@ proc run() {
   /* Create a domain for the correlation matrix. */
   const corrDomain : domain(2) = {1..n, 1..n};
   const imageDomain : domain(2) = {0..#h, 0..#w};
-  const numDomain : domain(1) = {1..n};
   const threadDomain : domain(1) = {0..#numThreads};
 
   var corrMatrix : [corrDomain] real;
@@ -81,10 +79,10 @@ proc run() {
   const localeDomain = {0..#numLocales} dmapped Block ({0..#numLocales});
   var overallTimerLoc : [localeDomain] real;
   
-  flushWriteln("Running Common Source Identification...");
-  flushWriteln("  ", n, " images");
-  flushWriteln("  ", numLocales, " locale(s)");
-  flushWriteln("  ", numThreads, " numThreads");
+  writeln("Running Common Source Identification...");
+  writeln("  ", n, " images");
+  writeln("  ", numLocales, " locale(s)");
+  writeln("  ", numThreads, " numThreads");
 
   /* ************************* Start here ********************* */
   forall (i,j) in corrDomain {
@@ -100,8 +98,15 @@ proc run() {
     var fwPlanRot : fftw_plan;
     var bwPlan : fftw_plan;
 
+    proc init(h_loc : int, w_loc : int, id : int, ref data : prnu_data) {
+      prnuInit(h_loc, w_loc, data);
+      
+      fwPlan = plan_dft(prnu, prnu, FFTW_FORWARD, FFTW_ESTIMATE);
+      fwPlanRot = plan_dft(prnuRot, prnuRot, FFTW_FORWARD, FFTW_ESTIMATE);
+      bwPlan = plan_dft(resultComplex, resultComplex, FFTW_BACKWARD, FFTW_ESTIMATE);
+    }
+
     proc deinit() {
-      // prnuDestroy(data);
       destroy_plan(fwPlan);
       destroy_plan(fwPlanRot);
       destroy_plan(bwPlan);
@@ -110,12 +115,16 @@ proc run() {
 
   coforall loc in Locales do on loc {
     // Create a timer for each thread. We'll sum these timers to get the overall time
-    var LocaleTimer : Timer;
+    var localeTimer : Timer;
     var crossSubDomain = crossDomain.localSubdomain();
     var threadArray : [threadDomain] ThreadData;
     var data : [threadDomain] prnu_data;
 
-    // This is the number of correlations that must be performed by each thread
+    /* Calculate the indices of the the corrMatrix that each thread will compute over
+     * We attempt to distribute the computations evenly over all the threads. 
+     * Any remaining computations are then distributed sequentially to threads to achieve optimal
+     * computation distribution.
+     */
     var defaultNum = crossSubDomain.size/numThreads : int;
     var rem = crossSubDomain.size % numThreads;
     var high : int;
@@ -132,24 +141,18 @@ proc run() {
       }
       high = low + num -1;
       threadTuples(thread) = (low, high);
-      // Init all the data
-      prnuInit(h, w, data[thread]);
-      threadArray[thread] = new unmanaged ThreadData();
-      threadArray[thread].fwPlan = plan_dft(threadArray[thread].prnu, threadArray[thread].prnu, FFTW_FORWARD, FFTW_ESTIMATE);
-      threadArray[thread].fwPlanRot = plan_dft(threadArray[thread].prnuRot, threadArray[thread].prnuRot, FFTW_FORWARD, FFTW_ESTIMATE);
-      threadArray[thread].bwPlan = plan_dft(threadArray[thread].resultComplex, threadArray[thread].resultComplex, FFTW_BACKWARD, FFTW_ESTIMATE);
+      // Create unmanaged objects for each thread. Data is initialized in the init fxn of the class.
+      threadArray[thread] = new unmanaged ThreadData(h, w, thread, data[thread]);
     }
 
-      // Start the thread timer
-    LocaleTimer.start();
+    // Start the locale timer
+    localeTimer.start();
     coforall thread in threadDomain {
-      // threadTimer[thread].start();
 
       var prnuTemp : [imageDomain] complex;
-
       var localSubDom : domain(1) = {threadTuples(thread)[1]..threadTuples(thread)[2]};
-      // threadTimer[thread].stop();
-      // Sequentially iterate over the localSubdom. MUST BE SEQUENTIAL because of FFT crap
+      
+      // Sequentially iterate over the localSubdom. MUST BE SEQUENTIAL because of FFT module limitations
       for idx in localSubDom {
         var (i,j) = crossTuples(idx);
 
@@ -158,9 +161,7 @@ proc run() {
         readJPG(image, imageFileNames[i].localize());
         readJPG(imageRot, imageFileNames[j].localize());
 
-        // Start the thread timer
-        // threadTimer[thread].start();
-
+        // Calculate the prnu for both images and rotate the prnu for 2nd image
         calculatePrnuComplex(h, w, image, threadArray[thread].prnu, data[thread]);
         calculatePrnuComplex(h, w, imageRot, prnuTemp, data[thread]);
         rotated180Prnu(h, w, prnuTemp, threadArray[thread].prnuRot);
@@ -175,15 +176,12 @@ proc run() {
         // Inverse FFT
         execute(threadArray[thread].bwPlan);
 
+        // Compute the PCE value
         corrMatrix(i,j) = computePCE(h, w, threadArray[thread].resultComplex);
-        // threadTimer[thread].stop();
       }
-      // threadTimer[thread].stop();
-      // Cleanup everything
-      // delete threadArray[thread];
     }
-    LocaleTimer.stop();
-    overallTimerLoc[loc.id] = LocaleTimer.elapsed();
+    localeTimer.stop();
+    overallTimerLoc[loc.id] = localeTimer.elapsed();
 
     for thread in threadDomain {
       delete threadArray[thread];
@@ -192,15 +190,15 @@ proc run() {
   }
   
   var overallTimer = max reduce overallTimerLoc;
-  flushWriteln("The first value of the corrMatrix is: ", corrMatrix[2,1]);
-  flushWriteln("Time: ", overallTimer, "s");
+  writeln("The first value of the corrMatrix is: ", corrMatrix[2,1]);
+  writeln("Time: ", overallTimer, "s");
 
-  flushWriteln("Throughput: ", nrCorrelations / overallTimer, " corrs/s");
+  writeln("Throughput: ", nrCorrelations / overallTimer, " corrs/s");
 
   if (writeOutput) {
-    flushWriteln("Writing output files...");
+    writeln("Writing output files...");
     write2DRealArray(corrMatrix, "corrMatrix");
   }
 
-  flushWriteln("End");
+  writeln("End");
 }

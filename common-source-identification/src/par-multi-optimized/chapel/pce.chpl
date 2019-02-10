@@ -1,3 +1,4 @@
+/* This function returns the max value and it's indices from a given 2D real matrix */
 proc getMax(result : [] real, h : int, w : int) {
     const imageDomain: domain(2) = {0..#h, 0..#w};
     var lowI, highI, lowJ, highJ : int;
@@ -13,6 +14,7 @@ proc getMax(result : [] real, h : int, w : int) {
     return (max, lowI, highI, lowJ, highJ);
 }
 
+/* This function computes the PCE value from a given 2D complex matrix */
 proc computePCE(h : int, w : int, resultComplex : [] complex, ref pce : real) {
     const imageDomain: domain(2) = {0..#h, 0..#w};
     

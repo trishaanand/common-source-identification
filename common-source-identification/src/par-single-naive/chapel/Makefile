@@ -49,4 +49,4 @@ run10:
 run6: 
 	./common-source-identification --writeOutput --numThreads 6
 
-run: run6 run10
+run: run10

@@ -1,6 +1,6 @@
 # The source files for Chapel
 CHAPEL_SRC	= common-source-identification.chpl prnu.chpl \
-		  read_jpg.chpl fft.chpl utils.chpl
+		  read_jpg.chpl pce.chpl utils.chpl
 
 # The source files for C
 C_SRC		= ../c/read_jpg.c ../c/fastnoise.c ../c/grayscale.c \
@@ -20,6 +20,8 @@ CFLAGS		= -ljpeg -lfftw3 -lm --fast
 # compiler to generate code for the right runtime.
 RT_FLAGS	= CHPL_LAUNCHER=slurm-gasnetrun_ibv CHPL_COMM=gasnet \
 		  CHPL_COMM_SUBSTRATE=ibv
+
+NUM_LOCALES = 16
 
 # The following targets do not represent files and are therefore phony targets
 .PHONY:		clean cleanslurm cleanoutput cleanall
@@ -45,4 +47,4 @@ cleanall: clean cleanslurm cleanoutput
 
 # Run the prnu
 run: 
-	./common-source-identification -nl 16 --writeOutput
+	./common-source-identification -nl $(NUM_LOCALES) --writeOutput

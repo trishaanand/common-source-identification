@@ -1,3 +1,0 @@
-1. keep ith prnu same, rotate jth prnu matrix 180 degres
-2. create another matrix to store imaginary part of the complex number and initialize it t 0.0
-3. apply fft
