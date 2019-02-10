@@ -1,7 +1,6 @@
-use FFTW;
 use Math;
-use Time;
 
+/* Compute the PCE value from a given complex 2D matrix */
 proc computePCE(h : int, w : int, resultComplex : [] complex) {
     const imageDomain: domain(2) = {0..#h, 0..#w};
     var result : [imageDomain] real;
@@ -11,11 +10,12 @@ proc computePCE(h : int, w : int, resultComplex : [] complex) {
         result(i,j) = ( resultComplex(i,j).re * resultComplex(i,j).re )/ ((h*w) * (h*w));
     }
     
+    // Find the peak value and it's index by calculating the max value in the 2D matrix
     var max, sum : real;
     sum = 0.0;
     var maxI, maxJ : int;
     for (i,j) in imageDomain do {
-        //Find the peak
+        
         if (max < result(i,j)) {
             max = result(i,j);
             maxI = i;
@@ -30,6 +30,7 @@ proc computePCE(h : int, w : int, resultComplex : [] complex) {
     lowJ = if ((maxJ-5) < 0) then 0 else maxJ -5;
     highJ = if ((maxJ + 5) > w) then w else maxJ + 5;
 
+    // Sum the remaining elements of the result matrix
     for (i,j) in imageDomain do {
         if(!(i > lowI && i < highI && j > lowJ && j < highJ )) {
             sum += result(i,j);

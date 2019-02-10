@@ -1,1 +1,6 @@
 ._*
+**/*.out
+**/.DS_Store
+**/timing-steps
+**/timing-steps.new
+**/timing-steps.batching

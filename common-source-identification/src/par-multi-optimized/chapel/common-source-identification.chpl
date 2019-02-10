@@ -116,7 +116,6 @@ proc run() {
     }
 
     proc deinit() {
-      // prnuDestroy(data);
       destroy_plan(fwPlan);
       destroy_plan(fwPlanRot);
       destroy_plan(bwPlan);
@@ -145,8 +144,6 @@ proc run() {
     }
     
     if (localNumThreads != 0) {
-
-      // This is the number of correlations that must be performed by each thread
       var threadDomain : domain(1) = {0..#localNumThreads};
 
       /* Create a local domain for image in each locale. This ensures that we don't copy h & w from locale[0] 

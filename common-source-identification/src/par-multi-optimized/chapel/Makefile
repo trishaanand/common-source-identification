@@ -28,6 +28,8 @@ RT_FLAGS	= CHPL_LAUNCHER=slurm-gasnetrun_ibv CHPL_COMM=gasnet \
 $(PROGNAME): $(CHAPEL_SRC) $(C_SRC) $(C_HEADER)
 	$(RT_FLAGS) $(CC) -o $@ $(OBJ) $(CFLAGS) $(CHAPEL_SRC)
 
+NUM_LOCALES=16
+
 # Clean the generated binaries
 clean: 
 	rm -f $(PROGNAME) $(PROGNAME)_real
@@ -45,4 +47,4 @@ cleanall: clean cleanslurm cleanoutput
 
 # Run the prnu
 run: 
-	./common-source-identification -nl 16 --maxCache 10 --numThreads 8 --writeOutput
+	./common-source-identification -nl $(NUM_LOCALES) --maxCache 10 --numThreads 8 --writeOutput

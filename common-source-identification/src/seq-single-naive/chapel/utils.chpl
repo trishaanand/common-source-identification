@@ -35,8 +35,3 @@ proc write2DRealArray(array : [] real, fileName :string) {
     channel.writeln();
   }
 }
-
-proc flushWriteln(s...?) {
-  stdout.writeln(s);
-  stdout.flush();
-}

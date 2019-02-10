@@ -7,6 +7,9 @@ use FileSystem;
 /* Time the execution. */
 use Time;
 
+/* FFT Module */
+use FFTW;
+
 /* Read in JPG images. */
 use read_jpg;
 
@@ -14,13 +17,12 @@ use read_jpg;
 use prnu;
 
 /* user defined functions */
-use fft;
+use pce;
 use utils;
 
 /* Configuration parameters */
 config const imagedir : string = "images";
 config const writeOutput : bool = false;
-config const num : int = 100; 
 
 /* Given a file name this function calculates & returns the prnu data for that image */
 proc calculatePrnuComplex(h : int, w : int, image : [] RGB, prnuComplex : [] complex, ref data : prnu_data) {
@@ -37,10 +39,10 @@ proc calculatePrnuComplex(h : int, w : int, image : [] RGB, prnuComplex : [] com
   }
 }
 
+/* Rotate the PRNU matrix 180 degrees */
 proc rotated180Prnu(h : int, w : int, prnu : [] complex, prnuRot : [] complex) {
   const imageDomain: domain(2) = {0..#h, 0..#w};
 
-  /* Rotate the matrix 180 degrees */
   for (i,j) in imageDomain do 
     prnuRot(i,j) = prnu(h-i-1, w-j-1);
 }
@@ -77,10 +79,9 @@ proc run() {
 
   var overallTimer : Timer;
 
-
-  flushWriteln("Running Common Source Identification...");
-  flushWriteln("  ", n, " images");
-  flushWriteln("  ", numLocales, " locale(s)");
+  writeln("Running Common Source Identification...");
+  writeln("  ", n, " images");
+  writeln("  ", numLocales, " locale(s)");
 
   /* ************************* Start here ********************* */
   for (i,j) in corrDomain {
@@ -97,6 +98,7 @@ proc run() {
   var fwPlanRot = plan_dft(prnuRot, prnuRot, FFTW_FORWARD, FFTW_ESTIMATE);
   var bwPlan = plan_dft(resultComplex, resultComplex, FFTW_BACKWARD, FFTW_ESTIMATE);
 
+  overallTimer.start();
   for idx in crossDomain {
     var (i,j) = crossTuples(idx);
 
@@ -105,14 +107,13 @@ proc run() {
     readJPG(images[0], imageFileNames[i]);
     readJPG(images[1], imageFileNames[j]);
     
-    overallTimer.start();
-
+    // Calculate the PRNU for both images. Also rotate the PRNU for 2nd image.
     var prnuTemp : [imageDomain] complex;
     calculatePrnuComplex(h, w, images[0], prnu, data);
     calculatePrnuComplex(h, w, images[1], prnuTemp, data);
     rotated180Prnu(h, w, prnuTemp, prnuRot);
 
-    // Calculate the FFT on the prnu & rot arrays
+    // Calculate the FFT on the prnu & prnu rot arrays
     execute(fwPlan);
     execute(fwPlanRot);
 
@@ -124,9 +125,11 @@ proc run() {
     // Inverse FFT
     execute(bwPlan);
 
+    // Compute the PCE value
     corrMatrix(i,j) = computePCE(h, w, resultComplex);
-    overallTimer.stop();
   }
+
+  overallTimer.stop();
 
   // Cleanup everything
   prnuDestroy(data);
@@ -135,15 +138,15 @@ proc run() {
   destroy_plan(bwPlan);
   cleanup();
 
-  flushWriteln("The first value of the corrMatrix is: ", corrMatrix[2,1]);
-  flushWriteln("Time: ", overallTimer.elapsed(), "s");
+  writeln("The first value of the corrMatrix is: ", corrMatrix[2,1]);
+  writeln("Time: ", overallTimer.elapsed(), "s");
 
-  flushWriteln("Throughput: ", nrCorrelations / overallTimer.elapsed(), " corrs/s");
+  writeln("Throughput: ", nrCorrelations / overallTimer.elapsed(), " corrs/s");
 
   if (writeOutput) {
-    flushWriteln("Writing output files...");
+    writeln("Writing output files...");
     write2DRealArray(corrMatrix, "corrMatrix");
   }
 
-  flushWriteln("End");
+  writeln("End");
 }

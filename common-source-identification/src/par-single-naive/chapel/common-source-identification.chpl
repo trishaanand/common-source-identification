@@ -17,7 +17,7 @@ use read_jpg;
 use prnu;
 
 /* user defined functions */
-use fft;
+use pce;
 use utils;
 
 /* Configuration parameters */
@@ -40,10 +40,10 @@ proc calculatePrnuComplex(h : int, w : int, image : [] RGB, prnuComplex : [] com
   }
 }
 
+/* Rotate the prnu matrix by 180 degrees */
 proc rotated180Prnu(h : int, w : int, prnu : [] complex, prnuRot : [] complex) {
   const imageDomain: domain(2) = {0..#h, 0..#w};
 
-  /* Rotate the matrix 180 degrees */
   forall (i,j) in imageDomain do 
     prnuRot(i,j) = prnu(h-i-1, w-j-1);
 }
@@ -74,12 +74,13 @@ proc run() {
   var corrMatrix : [corrDomain] real;
   var nrCorrelations = (n * (n - 1)) / 2;
   var crossDomain : domain(1) = {0..#nrCorrelations};
+  // Map to maintain relation b/w index in corrMatrix and images required to calculate pce for that index.
   var crossTuples : [crossDomain] 2*int;
 
-  flushWriteln("Running Common Source Identification...");
-  flushWriteln("  ", n, " images");
-  flushWriteln("  ", numLocales, " locale(s)");
-  flushWriteln("  ", numThreads, " numThreads");
+  writeln("Running Common Source Identification...");
+  writeln("  ", n, " images");
+  writeln("  ", numLocales, " locale(s)");
+  writeln("  ", numThreads, " numThreads");
 
   /* ************************* Start here ********************* */
   forall (i,j) in corrDomain {
@@ -89,7 +90,8 @@ proc run() {
     }
   }
 
-  // Create a timer for each thread. We'll sum these timers to get the overall time
+  // Create a timer for each thread. Since all the threads will execute parallely, 
+  // we'll get the max of these timers to get the overall time.
   var threadTimer : [threadDomain] Timer;
 
   class ThreadData {
@@ -98,9 +100,14 @@ proc run() {
     var fwPlanRot : fftw_plan;
     var bwPlan : fftw_plan;
 
+    proc init(h : int, w : int, id : int, ref data : prnu_data) {
+      prnuInit(h, w, data);
+      fwPlan = plan_dft(prnu, prnu, FFTW_FORWARD, FFTW_ESTIMATE);
+      fwPlanRot = plan_dft(prnuRot, prnuRot, FFTW_FORWARD, FFTW_ESTIMATE);
+      bwPlan = plan_dft(resultComplex, resultComplex, FFTW_BACKWARD, FFTW_ESTIMATE);
+    }
+
     proc deinit() {
-      flushWriteln("In the ThreadData deconstructor ");
-      // prnuDestroy(data);
       destroy_plan(fwPlan);
       destroy_plan(fwPlanRot);
       destroy_plan(bwPlan);
@@ -110,16 +117,22 @@ proc run() {
   var threadArray : [threadDomain] ThreadData;
   var data : [threadDomain] prnu_data;
 
-  // This is the number of correlations that must be performed by each thread
+  /* This is the number of correlations that must be performed by each thread
+   * 1. Divide the total # of calculations by the number of threads. 
+   * 2. If remainder is non-zero, distribute the remaining calculations 1 per thread
+   * This ensures efficient work distribution of computations amongst all the threads.
+   */
   var defaultNum = nrCorrelations/numThreads : int;
   var rem = nrCorrelations % numThreads;
   var high : int;
   var threadTuples : [threadDomain] 2*int;
   high = -1; 
 
-  // Calculate the indices of the the corrMatrix that each thread will compute over
-  // IMP: Must be sequential else it throws a segmentation fault
+  /* IMP: Must be sequential else it throws a segmentation fault.
+   * This is because the FFT & PRNU  initialization must be performed sequentially
+   */
   for thread in threadDomain {
+    // Calculate the indices of the the corrMatrix that each thread will compute over
     var low = high + 1; 
     var num = defaultNum;
     if thread < rem {
@@ -127,12 +140,8 @@ proc run() {
     }
     high = low + num -1;
     threadTuples(thread) = (low, high);
-    // Init all the data
-    prnuInit(h, w, data[thread]);
-    threadArray[thread] = new unmanaged ThreadData();
-    threadArray[thread].fwPlan = plan_dft(threadArray[thread].prnu, threadArray[thread].prnu, FFTW_FORWARD, FFTW_ESTIMATE);
-    threadArray[thread].fwPlanRot = plan_dft(threadArray[thread].prnuRot, threadArray[thread].prnuRot, FFTW_FORWARD, FFTW_ESTIMATE);
-    threadArray[thread].bwPlan = plan_dft(threadArray[thread].resultComplex, threadArray[thread].resultComplex, FFTW_BACKWARD, FFTW_ESTIMATE);
+    // Init all the data for each thread.
+    threadArray[thread] = new unmanaged ThreadData(h, w, thread, data[thread]);
   }
 
   coforall thread in threadDomain {
@@ -144,6 +153,7 @@ proc run() {
 
     var localSubDom : domain(1) = {threadTuples(thread)[1]..threadTuples(thread)[2]};
     threadTimer[thread].stop();
+
     // Sequentially iterate over the localSubdom. MUST BE SEQUENTIAL because of FFT crap
     for idx in localSubDom {
       var (i,j) = crossTuples(idx);
@@ -169,25 +179,26 @@ proc run() {
       // Inverse FFT
       execute(threadArray[thread].bwPlan);
 
+      // Compute the pce value
       corrMatrix(i,j) = computePCE(h, w, threadArray[thread].resultComplex);
+
       threadTimer[thread].stop();
     }
-    // Cleanup everything
-    // delete threadArray[thread];
   }
+
   cleanup();
   
   var overallTimer = max reduce threadTimer.elapsed();
 
-  flushWriteln("The first value of the corrMatrix is: ", corrMatrix[2,1]);
-  flushWriteln("Time: ", overallTimer, "s");
+  writeln("The first value of the corrMatrix is: ", corrMatrix[2,1]);
+  writeln("Time: ", overallTimer, "s");
 
-  flushWriteln("Throughput: ", nrCorrelations / overallTimer, " corrs/s");
+  writeln("Throughput: ", nrCorrelations / overallTimer, " corrs/s");
 
   if (writeOutput) {
-    flushWriteln("Writing output files...");
+    writeln("Writing output files...");
     write2DRealArray(corrMatrix, "corrMatrix");
   }
 
-  flushWriteln("End");
+  writeln("End");
 }

@@ -1,6 +1,6 @@
 # The source files for Chapel
 CHAPEL_SRC	= common-source-identification.chpl prnu.chpl \
-		  read_jpg.chpl fft.chpl utils.chpl
+		  read_jpg.chpl pce.chpl utils.chpl
 
 # The source files for C
 C_SRC		= ../c/read_jpg.c ../c/fastnoise.c ../c/grayscale.c \
